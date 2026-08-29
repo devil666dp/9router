@@ -1,3 +1,28 @@
+# Unreleased
+
+## Features
+- **Providers**: add `qwen` (QwenCloud / DashScope, Singapore endpoint) as a
+  media provider — 21 image models (Qwen-Image 3.0/2.0, the edit line, Z-Image,
+  Wan 2.7-2.1 text-to-image) and 33 video models (Wan 3.0, Wan 2.7 i2v/t2v/r2v/
+  videoedit, HappyHorse 1.1/1.0, Wan 2.6-2.1 image-to-video, first+last frame,
+  reference-to-video, text-to-video, VACE general editing, image-to-animation and
+  character swap)
+- **Video**: one common request shape across every qwen video model — each field
+  is optional and the ones a model does not accept are dropped before the request
+  leaves, so a prompt-only body works everywhere. Illegal media combinations are
+  rejected locally with a 400 instead of surfacing as a FAILED task minutes later
+- **Video**: `POST /v1/videos/generations` now returns the finished video for
+  providers whose upstream is async-only (qwen): the render is waited out
+  server-side and the response carries `{status:"done", video:{url}}` instead of
+  a job id to poll. If the render outlives `VIDEO_AWAIT_TIMEOUT_MS` (default
+  15 min), or the client disconnects, the response falls back to the job id and
+  `GET /v1/videos/{id}` finishes it — the job is never re-created. xAI keeps its
+  byte-for-byte proxy and its existing create-then-poll flow
+
+## Fixes
+- **API**: `/v1/models/info` reported `endpoint: null` for video models — now
+  `/v1/videos/generations`
+
 # v0.5.55 (2026-08-14)
 
 ## Features

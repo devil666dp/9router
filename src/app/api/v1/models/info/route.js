@@ -5,6 +5,7 @@ import { getModelKind } from "@/shared/constants/models";
 const KIND_ENDPOINT = {
   llm: "/v1/chat/completions",
   image: "/v1/images/generations",
+  video: "/v1/videos/generations",
   tts: "/v1/audio/speech",
   stt: "/v1/audio/transcriptions",
   embedding: "/v1/embeddings",

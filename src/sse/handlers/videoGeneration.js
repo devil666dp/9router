@@ -15,7 +15,8 @@ import { runMediaCombo } from "../services/mediaCombo.js";
 import * as log from "../utils/logger.js";
 
 // Fallback provider for requests that name no provider: a bare model id, or a multipart
-// body we deliberately don't parse. xAI is the only registry entry with a videoConfig today.
+// body we deliberately don't parse. Providers with a videoConfig are matched by an
+// explicit "provider/model" prefix; anything else lands here.
 const DEFAULT_VIDEO_PROVIDER = "xai";
 
 // Creation POSTs are billable jobs — only rotate to another account for
