@@ -19,6 +19,8 @@ vi.mock("../../src/sse/services/auth.js", () => ({
 vi.mock("@/lib/localDb", () => ({ getSettings: async () => ({ requireApiKey: false }) }));
 vi.mock("../../src/sse/services/model.js", () => ({
   getModelInfo: async () => ({ provider: "openai", model: "text-embedding-3-small" }),
+  // These tests exercise a single model; null keeps the handler off the combo path.
+  getComboModels: async () => null,
 }));
 vi.mock("../../open-sse/handlers/embeddingsCore.js", () => ({
   handleEmbeddingsCore: mocks.handleEmbeddingsCore,

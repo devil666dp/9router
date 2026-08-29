@@ -6,10 +6,12 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo } from "../services/model.js";
+import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
+import { runMediaCombo } from "../services/mediaCombo.js";
+import { withServedByModel } from "../utils/servedBy.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
@@ -75,6 +77,28 @@ export async function handleEmbeddings(request) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: input");
   }
 
+  // Combo expansion: model may be a combo name → run fallback/round-robin across models
+  const comboModels = await getComboModels(modelStr);
+  if (comboModels) {
+    return runMediaCombo({
+      comboName: modelStr,
+      models: comboModels,
+      settings,
+      body,
+      log,
+      tag: "EMBEDDINGS",
+      handleSingleModel: (b, m) => handleSingleModelEmbeddings(b, m, url.pathname, apiKey),
+    });
+  }
+
+  return handleSingleModelEmbeddings(body, modelStr, url.pathname, apiKey);
+}
+
+/**
+ * Run one embeddings model through the account-fallback loop.
+ * Returns a Response so it can be used as a combo attempt.
+ */
+async function handleSingleModelEmbeddings(body, modelStr, endpointPath, apiKey) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) {
     log.warn("EMBEDDINGS", "Invalid model format", { model: modelStr });
@@ -142,12 +166,12 @@ export async function handleEmbeddings(request) {
           model,
           connectionId: credentials.connectionId,
           apiKey,
-          endpoint: url.pathname,
+          endpoint: endpointPath,
           tokens: usage,
           status: "success",
         }).catch(() => {});
       }
-      return result.response;
+      return withServedByModel(result.response, provider, model);
     }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);

@@ -7,10 +7,17 @@ import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/c
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
 
-// Kinds that support combos (currently disabled for image/tts — temporarily hidden).
-// webSearch/webFetch handled by /web page.
-const COMBO_KINDS = new Set([]);
-const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
+// Kinds that support combos. Media combos run Fallback or Round Robin only — there is no
+// meaningful way for a judge to synthesize two audio files or two embedding vectors, so
+// Fusion stays LLM-only. webSearch/webFetch are handled by the /web page.
+const COMBO_KINDS = new Set(["embedding", "image", "tts", "stt", "video"]);
+const COMBO_BASE_NAMES = {
+  embedding: "embedding-combo",
+  image: "image-combo",
+  tts: "tts-combo",
+  stt: "stt-combo",
+  video: "video-combo",
+};
 
 function getEffectiveStatus(conn) {
   const isCooldown = Object.entries(conn).some(

@@ -266,6 +266,35 @@ export function getComboModelsFromData(modelStr, combosData) {
 }
 
 /**
+ * Resolve the effective strategy for a combo from settings.
+ *
+ * Precedence: per-combo `settings.comboStrategies[name].fallbackStrategy`, then the
+ * global `settings.comboStrategy`, then "fallback".
+ *
+ * `allowFusion: false` coerces a stored "fusion" down to "fallback". Media kinds
+ * (embedding/image/tts/stt/video) have nothing to synthesize — there is no judge that
+ * can merge two audio files or two embedding vectors — so a fusion entry left over from
+ * an LLM combo of the same name must not reach the panel+judge path.
+ *
+ * @param {string} comboName
+ * @param {Object} settings - Settings object (comboStrategies, comboStrategy, comboStickyRoundRobinLimit)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.allowFusion=true] - When false, "fusion" degrades to "fallback"
+ * @returns {{ strategy: string, stickyLimit: number|string, judgeModel: string|undefined, tuning: Object|undefined }}
+ */
+export function resolveComboStrategy(comboName, settings, { allowFusion = true } = {}) {
+  const perCombo = (settings?.comboStrategies || {})[comboName] || {};
+  let strategy = perCombo.fallbackStrategy || settings?.comboStrategy || "fallback";
+  if (strategy === "fusion" && !allowFusion) strategy = "fallback";
+  return {
+    strategy,
+    stickyLimit: settings?.comboStickyRoundRobinLimit,
+    judgeModel: perCombo.judgeModel,
+    tuning: perCombo.fusionTuning,
+  };
+}
+
+/**
  * Handle combo chat with fallback
  * @param {Object} options
  * @param {Object} options.body - Request body
@@ -275,9 +304,12 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
+ * @param {Function} [options.shouldFallbackFn=checkFallbackError] - (status, errorText) => { shouldFallback, cooldownMs }.
+ *   Override for surfaces whose retries are not free: video creation must not re-send on 5xx
+ *   (the job may already exist upstream and a retry double-bills).
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, shouldFallbackFn = checkFallbackError }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -332,7 +364,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
 
       // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
+      const { shouldFallback, cooldownMs } = shouldFallbackFn(result.status, errorText);
 
       if (!shouldFallback) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });

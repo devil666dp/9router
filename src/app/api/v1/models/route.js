@@ -292,7 +292,9 @@ export async function buildModelsList(kindFilter, options = {}) {
 
   const models = [];
 
-  // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
+  // Combos first (filtered by kind). Typed combos expose `kind` so a caller can tell an
+  // embedding combo from a TTS one — the names are free-form and carry no modality.
+  // LLM combos have no kind and stay bare, as before.
   for (const combo of combos) {
     if (!comboMatchesKinds(combo, kindFilter)) continue;
     const entry = {
@@ -300,7 +302,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       object: "model",
       owned_by: "combo",
     };
-    if (combo.kind === "webSearch" || combo.kind === "webFetch") {
+    if (combo.kind) {
       entry.kind = combo.kind;
     }
     models.push(entry);

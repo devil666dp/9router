@@ -5,6 +5,22 @@ import { getExecutor } from "../executors/index.js";
 import { getImageAdapter } from "./imageProviders/index.js";
 import { urlToBase64 } from "./imageProviders/_base.js";
 
+/**
+ * True when a normalized image response actually carries something renderable.
+ *
+ * An entry counts only if it has base64 bytes or a URL — a provider can return
+ * `data: [{}]` or `data: []`, both of which are unusable to the caller.
+ */
+function hasUsableImage(responseBody) {
+  const entries = responseBody?.data;
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  return entries.some((entry) => {
+    if (typeof entry === "string") return entry.length > 0;
+    if (!entry || typeof entry !== "object") return false;
+    return !!(entry.b64_json || entry.url || entry.image_url);
+  });
+}
+
 function serializeRequestBody(requestBody) {
   if (typeof FormData !== "undefined" && requestBody instanceof FormData) return requestBody;
   if (typeof requestBody === "string") return requestBody;
@@ -55,9 +71,17 @@ export async function handleImageGenerationCore({
     try {
       log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
       const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
-      if (onRequestSuccess) await onRequestSuccess();
       const normalized = adapter.normalize(responseBody, body.prompt);
       const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : responseBody;
+
+      // Same empty-payload guard as the non-executor path below — a 200 with no image is a
+      // failure the caller can't use, so let the account loop and combo move on.
+      if (!hasUsableImage(finalBody)) {
+        log?.warn?.("IMAGE", `${provider.toUpperCase()} | ${model} | returned no image data`);
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `[${provider}/${model}] returned no image data`);
+      }
+
+      if (onRequestSuccess) await onRequestSuccess();
 
       if (binaryOutput) {
         const first = finalBody.data?.[0];
@@ -186,13 +210,24 @@ export async function handleImageGenerationCore({
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, parseError.message || `Invalid response from ${provider}`);
   }
 
-  if (onRequestSuccess) await onRequestSuccess();
-
   // Normalize → OpenAI-compatible shape
   const normalized = adapter.normalize(parsed, body.prompt);
 
   // Already in OpenAI shape? skip re-normalize
   const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : parsed;
+
+  // Some providers (fal-ai in particular) answer 200 with a COMPLETED job whose payload
+  // carries no images at all. Handing that back as a success would end a combo on the first
+  // member and give the caller an empty `data` array, so treat it as an upstream failure:
+  // 502 makes the account loop try the provider's next account and, once those are spent,
+  // lets the combo move on to the next model with the same prompt. Checked before
+  // onRequestSuccess so an empty result doesn't clear the account's error state.
+  if (!hasUsableImage(finalBody)) {
+    log?.warn?.("IMAGE", `${provider.toUpperCase()} | ${model} | returned no image data`);
+    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `[${provider}/${model}] returned no image data`);
+  }
+
+  if (onRequestSuccess) await onRequestSuccess();
 
   // Binary output: decode first b64_json (or fetch url) into raw bytes
   if (binaryOutput) {

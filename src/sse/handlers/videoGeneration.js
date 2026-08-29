@@ -6,15 +6,16 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
-import { getModelInfo } from "../services/model.js";
+import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleVideoProxyCore, getVideoConfig, sanitizeSecrets } from "open-sse/handlers/videoCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
+import { runMediaCombo } from "../services/mediaCombo.js";
 import * as log from "../utils/logger.js";
 
-// Video generation is xAI-only today; requests without a provider prefix
-// (bare model id, or multipart bodies we deliberately don't parse) land here.
+// Fallback provider for requests that name no provider: a bare model id, or a multipart
+// body we deliberately don't parse. xAI is the only registry entry with a videoConfig today.
 const DEFAULT_VIDEO_PROVIDER = "xai";
 
 // Creation POSTs are billable jobs — only rotate to another account for
@@ -60,13 +61,16 @@ async function readForwardableBody(request) {
   return { raw: buf, parsed: null, contentType };
 }
 
-async function resolveVideoProvider(parsedBody) {
-  if (!parsedBody?.model) return { provider: DEFAULT_VIDEO_PROVIDER, model: null };
+async function resolveVideoProvider(rawModel) {
+  if (!rawModel) return { provider: DEFAULT_VIDEO_PROVIDER, model: null };
 
-  const modelStr = String(parsedBody.model);
+  const modelStr = String(rawModel);
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) {
-    return { error: errorResponse(HTTP_STATUS.BAD_REQUEST, "Combos are not supported for video generation") };
+    // A null provider here means the name resolved to neither a provider prefix nor a known
+    // alias. Combo names also land here, but handleVideoCreate expands those before calling
+    // this, so by now the name is simply unroutable.
+    return { error: errorResponse(HTTP_STATUS.BAD_REQUEST, `Cannot resolve video model: ${modelStr}`) };
   }
   if (!getVideoConfig(modelInfo.provider)) {
     // Bare model ids (no explicit "provider/" prefix) fall back to the default
@@ -79,13 +83,40 @@ async function resolveVideoProvider(parsedBody) {
   return { provider: modelInfo.provider, model: modelInfo.model };
 }
 
-function withConnectionHeader(response, connectionId) {
-  if (!connectionId) return response;
+function withJobHeaders(response, connectionId, provider) {
   const headers = new Headers(response.headers);
-  // Video jobs are account-bound upstream — clients echo this back as
-  // `x-connection-id` on GET polls so the same account is used.
-  headers.set("x-9router-connection-id", String(connectionId));
+  // Video jobs are bound to the creating account AND the creating provider upstream.
+  // Clients echo both back on GET polls (`x-connection-id`, `x-provider`) so the poll
+  // reaches the same account at the same provider that minted the job id.
+  if (connectionId) headers.set("x-9router-connection-id", String(connectionId));
+  if (provider) headers.set("x-9router-provider", String(provider));
   return new Response(response.body, { status: response.status, headers });
+}
+
+/**
+ * Retry predicate for video-combo creation.
+ *
+ * Creation POSTs are billable. A 5xx may mean the job was created and the response was lost,
+ * so re-sending it to another provider would bill twice — those are returned to the caller.
+ * Anything below 500 (auth, quota, unsupported params, no credentials) is rejected before a
+ * job exists, so the next combo member gets the same prompt. Mirrors the intent of
+ * CREATE_ROTATION_STATUSES, which governs rotation between accounts of one provider.
+ */
+function videoComboShouldFallback(status) {
+  return { shouldFallback: Number(status) < 500, cooldownMs: 0 };
+}
+
+/**
+ * Which provider a poll should be sent to.
+ *
+ * Clients created before combos existed send no `x-provider`, so an absent or unusable value
+ * falls back to the default — preserving their behavior. A named provider is honored only when
+ * it actually does video, so the header can't be used to aim a poll at an arbitrary provider.
+ */
+function resolvePollProvider(headerValue) {
+  const candidate = typeof headerValue === "string" ? headerValue.trim() : "";
+  if (!candidate || !getVideoConfig(candidate)) return DEFAULT_VIDEO_PROVIDER;
+  return candidate;
 }
 
 /**
@@ -98,12 +129,41 @@ export async function handleVideoCreate(request, action) {
   const bodyInfo = await readForwardableBody(request);
   if (bodyInfo.error) return bodyInfo.error;
 
-  const resolved = await resolveVideoProvider(bodyInfo.parsed);
+  // Combo expansion: model may be a combo name → retry the same prompt on the next member.
+  // JSON only. A multipart body is forwarded as opaque bytes to preserve its boundary, so the
+  // `model` field can't be rewritten per attempt — those keep the single-provider path.
+  if (bodyInfo.parsed?.model) {
+    const modelStr = String(bodyInfo.parsed.model);
+    const comboModels = await getComboModels(modelStr);
+    if (comboModels) {
+      const settings = await getSettings();
+      return runMediaCombo({
+        comboName: modelStr,
+        models: comboModels,
+        settings,
+        log,
+        tag: "VIDEO",
+        shouldFallbackFn: videoComboShouldFallback,
+        handleSingleModel: (_body, m) => handleSingleModelVideoCreate(request, action, bodyInfo, m),
+      });
+    }
+  }
+
+  return handleSingleModelVideoCreate(request, action, bodyInfo, bodyInfo.parsed?.model ?? null);
+}
+
+/**
+ * Create a video job on one target model, rotating between that provider's accounts.
+ * Returns a Response so it can be used as a combo attempt.
+ */
+async function handleSingleModelVideoCreate(request, action, bodyInfo, rawModel) {
+  const resolved = await resolveVideoProvider(rawModel);
   if (resolved.error) return resolved.error;
   const { provider, model } = resolved;
 
   // Strip the provider prefix (e.g. "xai/grok-imagine-video") before forwarding;
-  // otherwise forward the original bytes untouched.
+  // otherwise forward the original bytes untouched. A combo attempt also lands here, so the
+  // comparison is against this attempt's target rather than the body's original model field.
   let forwardBody = bodyInfo.raw;
   if (bodyInfo.parsed && model && bodyInfo.parsed.model !== model) {
     forwardBody = JSON.stringify({ ...bodyInfo.parsed, model });
@@ -155,7 +215,7 @@ export async function handleVideoCreate(request, action) {
     if (result.success) {
       await clearAccountError(credentials.connectionId, credentials, model);
       log.info("VIDEO", `${provider.toUpperCase()} | ${action} accepted (connection ${credentials.connectionId})`);
-      return withConnectionHeader(result.response, credentials.connectionId);
+      return withJobHeaders(result.response, credentials.connectionId, provider);
     }
 
     // Record the failure (dashboard shows lastError/errorCode → user sees re-auth is needed)
@@ -176,8 +236,9 @@ export async function handleVideoCreate(request, action) {
 
 /**
  * GET /v1/videos/{request_id} — poll job status.
- * Jobs are account-bound upstream, so no cross-account rotation here: the
- * caller pins the creating account via `x-connection-id` (returned on create).
+ * Jobs are account- and provider-bound upstream, so no rotation here: the caller pins both
+ * via `x-connection-id` and `x-provider` (both returned on create). Combos make the provider
+ * part load-bearing — a job created on the second combo member is unknown to the first.
  */
 export async function handleVideoGet(request, requestId) {
   const authError = await requireValidApiKey(request);
@@ -185,7 +246,7 @@ export async function handleVideoGet(request, requestId) {
 
   if (!requestId) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing video request id");
 
-  const provider = DEFAULT_VIDEO_PROVIDER;
+  const provider = resolvePollProvider(request.headers.get("x-provider"));
   const preferredConnectionId = request.headers.get("x-connection-id") || null;
 
   const credentials = await getProviderCredentials(provider, null, null, { preferredConnectionId });
@@ -213,7 +274,7 @@ export async function handleVideoGet(request, requestId) {
 
   if (result.success) {
     await clearAccountError(credentials.connectionId, credentials, null);
-    return withConnectionHeader(result.response, credentials.connectionId);
+    return withJobHeaders(result.response, credentials.connectionId, provider);
   }
 
   await markAccountUnavailable(

@@ -22,6 +22,9 @@ const KIND_LABELS = {
   webFetch: "Web Fetch",
   image: "Text to Image",
   tts: "Text To Speech",
+  stt: "Speech To Text",
+  embedding: "Embedding",
+  video: "Video",
 };
 
 const EXAMPLE_PATHS = {
@@ -29,6 +32,9 @@ const EXAMPLE_PATHS = {
   webFetch: "/v1/web/fetch",
   image: "/v1/images/generations",
   tts: "/v1/audio/speech",
+  stt: "/v1/audio/transcriptions",
+  embedding: "/v1/embeddings",
+  video: "/v1/videos/generations",
 };
 
 const EXAMPLE_BODIES = {
@@ -36,6 +42,25 @@ const EXAMPLE_BODIES = {
   webFetch: (n) => ({ model: n, url: "https://example.com", format: "markdown" }),
   image: (n) => ({ model: n, prompt: "A cute cat playing piano", n: 1, size: "1024x1024" }),
   tts: (n) => ({ model: n, input: "Hello, this is a test.", voice: "alloy" }),
+  embedding: (n) => ({ model: n, input: "The quick brown fox jumps over the lazy dog." }),
+  video: (n) => ({ model: n, prompt: "A cat surfing a wave at sunset", duration: 5 }),
+};
+
+// Kinds whose upstream request is multipart rather than JSON. The Run button posts JSON and
+// there is no audio file to attach from this panel, so the curl is shown as documentation only.
+const FILE_UPLOAD_KINDS = new Set(["stt"]);
+
+// curl text for kinds the generic JSON template can't express.
+const CURL_OVERRIDES = {
+  stt: (name, path, key) =>
+    `curl -X POST http://localhost:20128${path} \\\n  -H "Authorization: Bearer ${key}" \\\n  -F "file=@audio.mp3" \\\n  -F "model=${name}"`,
+};
+
+// Extra guidance under the curl sample, per kind.
+const KIND_HINTS = {
+  stt: "Multipart upload — run this from a terminal with a real audio file.",
+  embedding: "Vector dimension varies per model. The response carries x-9router-model naming the model that actually served the request.",
+  video: "Creation is async: the response is a job id. Poll GET /v1/videos/{id}, echoing the x-9router-provider and x-9router-connection-id headers back as x-provider and x-connection-id.",
 };
 
 // Map combo.kind → listing route to go back to
@@ -183,23 +208,26 @@ export default function ComboDetailPage() {
       if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
       const res = await fetch(`/api${path}`, { method: "POST", headers, body: JSON.stringify(body) });
       const latencyMs = Date.now() - start;
+      // Which combo member actually served this. The body is often binary (or carries no
+      // model field), so the header is the only place the answer always appears.
+      const servedBy = res.headers.get("x-9router-model") || "";
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setTestError(d?.error?.message || d?.error || `HTTP ${res.status}`);
-        setTestResult({ json: JSON.stringify(d, null, 2), latencyMs });
+        setTestResult({ json: JSON.stringify(d, null, 2), latencyMs, servedBy });
         return;
       }
       const ctype = res.headers.get("content-type") || "";
       // Binary image
       if (ctype.startsWith("image/")) {
         const blob = await res.blob();
-        setTestResult({ imageUrl: URL.createObjectURL(blob), latencyMs });
+        setTestResult({ imageUrl: URL.createObjectURL(blob), latencyMs, servedBy });
         return;
       }
       // Binary audio
       if (ctype.startsWith("audio/") || ctype === "application/octet-stream") {
         const blob = await res.blob();
-        setTestResult({ audioUrl: URL.createObjectURL(blob), latencyMs });
+        setTestResult({ audioUrl: URL.createObjectURL(blob), latencyMs, servedBy });
         return;
       }
       // JSON — could be image (data[0].b64_json/url) or generic
@@ -208,11 +236,14 @@ export default function ComboDetailPage() {
       const imageUrl = first?.b64_json
         ? `data:image/png;base64,${first.b64_json}`
         : (first?.url || "");
-      setTestResult({ json: JSON.stringify(maskB64(data), null, 2), imageUrl, latencyMs });
+      setTestResult({ json: JSON.stringify(maskB64(data), null, 2), imageUrl, latencyMs, servedBy: servedBy || data?.model || "" });
     } catch (e) {
       setTestError(e.message || "Network error");
+    } finally {
+      // finally, not a tail call: the binary branches above return early and would
+      // otherwise leave the button stuck on "Running...".
+      setTesting(false);
     }
-    setTesting(false);
   };
 
   // Mask large b64_json strings to keep JSON view readable
@@ -234,9 +265,14 @@ export default function ComboDetailPage() {
   const kindLabel = KIND_LABELS[combo.kind] || MEDIA_PROVIDER_KINDS.find((k) => k.id === combo.kind)?.label || "Combo";
   const examplePath = EXAMPLE_PATHS[combo.kind];
   const exampleBody = combo.kind && EXAMPLE_BODIES[combo.kind] ? EXAMPLE_BODIES[combo.kind](combo.name) : null;
-  const curlExample = examplePath
-    ? `curl -X POST http://localhost:20128${examplePath} \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${apiKey || "YOUR_KEY"}" \\\n  -d '${JSON.stringify(exampleBody)}'`
-    : "";
+  const isFileUpload = FILE_UPLOAD_KINDS.has(combo.kind);
+  const kindHint = KIND_HINTS[combo.kind];
+  const curlOverride = CURL_OVERRIDES[combo.kind];
+  const curlExample = !examplePath
+    ? ""
+    : curlOverride
+      ? curlOverride(combo.name, examplePath, apiKey || "YOUR_KEY")
+      : `curl -X POST http://localhost:20128${examplePath} \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${apiKey || "YOUR_KEY"}" \\\n  -d '${JSON.stringify(exampleBody)}'`;
   const backHref = getListingHref(combo.kind);
 
   return (
@@ -334,21 +370,32 @@ export default function ComboDetailPage() {
         <Card>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
             <h2 className="text-lg font-semibold">Test Example</h2>
-            <Button size="sm" icon="play_arrow" onClick={handleTest} disabled={testing || providers.length === 0}>
+            <Button size="sm" icon="play_arrow" onClick={handleTest} disabled={testing || providers.length === 0 || isFileUpload}>
               {testing ? "Running..." : "Run"}
             </Button>
           </div>
           <pre className="text-xs font-mono bg-black/[0.03] dark:bg-white/[0.03] p-3 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
             {curlExample}
           </pre>
+          {kindHint && (
+            <p className="mt-2 text-[11px] text-text-muted">{kindHint}</p>
+          )}
           {testError && (
             <p className="mt-3 text-xs text-red-500 break-words">{testError}</p>
           )}
           {testResult && (
             <div className="mt-3 flex flex-col gap-3">
-              {testResult.latencyMs != null && (
-                <span className="text-[11px] text-text-muted">⚡ {testResult.latencyMs}ms</span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {testResult.latencyMs != null && (
+                  <span className="text-[11px] text-text-muted">⚡ {testResult.latencyMs}ms</span>
+                )}
+                {testResult.servedBy && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                    <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                    served by <code className="font-mono text-[11px] text-primary">{testResult.servedBy}</code>
+                  </span>
+                )}
+              </div>
               {testResult.imageUrl && (
                 <div>
                   <div className="flex items-center justify-end mb-1.5">

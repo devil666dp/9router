@@ -7,6 +7,7 @@ const KIND_SLUG_MAP = {
   "stt": ["stt"],
   "embedding": ["embedding"],
   "image-to-text": ["imageToText"],
+  "video": ["video"],
   "web": ["webSearch", "webFetch"],
 };
 
@@ -22,7 +23,7 @@ export async function OPTIONS() {
 
 /**
  * GET /v1/models/{kind} - OpenAI-compatible models list filtered by capability.
- * Supported kinds: image, tts, stt, embedding, image-to-text, web.
+ * Supported kinds: image, tts, stt, embedding, image-to-text, video, web.
  */
 export async function GET(_request, { params }) {
   try {
