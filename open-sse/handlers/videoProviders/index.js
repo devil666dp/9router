@@ -7,9 +7,11 @@
 // create/poll URLs, headers and body, and normalizes both responses into the
 // same `{request_id}` / `{status, video:{url}}` contract clients already poll.
 import qwen from "./qwen.js";
+import falAi from "./falAi.js";
 
 const ADAPTERS = {
   qwen,
+  "fal-ai": falAi,
 };
 
 export function getVideoAdapter(provider) {

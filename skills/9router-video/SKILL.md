@@ -1,18 +1,19 @@
 ---
 name: 9router-video
-description: Generate videos via 9Router /v1/videos/generations - xAI Grok Imagine (async: submit, poll request_id, download MP4) and Qwen/DashScope Wan + HappyHorse (one blocking call that returns the finished video). Use when the user wants to create, generate, or render a video, text-to-video (txt2vid), image-to-video, reference-to-video, video editing, or character swap.
+description: Generate videos via 9Router /v1/videos/generations - xAI Grok Imagine (async: submit, poll request_id, download MP4), Qwen/DashScope Wan + HappyHorse, and fal.ai (Veo 3.1, Sora 2, Kling, Seedance, Topaz, SeedVR and more) which both return the finished video from one blocking call. Use when the user wants to create, generate, or render a video, text-to-video (txt2vid), image-to-video, reference-to-video, video editing, upscaling, lipsync, or character swap.
 ---
 
 # 9Router — Video Generation
 
 Requires `NINEROUTER_URL` (and `NINEROUTER_KEY` if auth enabled). See https://raw.githubusercontent.com/decolua/9router/refs/heads/master/skills/9router/SKILL.md for setup.
 
-Two providers, one endpoint set:
+Three providers, one endpoint set:
 
 | Provider | Models | How a create call answers |
 |---|---|---|
 | `xai` | `grok-imagine-video` | returns `{"request_id"}`, you poll |
 | `qwen` | Wan 3.0 / 2.7 / 2.6 / 2.5 / 2.2 / 2.1, HappyHorse 1.1/1.0, VACE, animate | **blocks until the render finishes** and returns `{"status":"done","video":{"url"}}` |
+| `fal` | Veo 3.1, Sora 2, Kling, Seedance, Dreamactor, Omnihuman, BiRefNet, Bria, SeedVR, Topaz, Grok Imagine — 119 endpoints | **blocks until the render finishes** and returns `{"status":"done","video":{"url"}}` |
 
 ## xAI Grok Imagine
 
@@ -125,6 +126,65 @@ curl -X POST "$NINEROUTER_URL/v1/videos/generations" \
 | Animation / character swap | `wan2.2-animate-move`, `wan2.2-animate-mix` | `image` + `video` |
 
 Ask 9Router which fields a model takes: `GET /v1/models/info?id=qwen/wan3.0-video` returns its `params` and `capabilities`.
+
+## fal.ai
+
+Requires a connected **fal API key** in the dashboard (`https://fal.ai/dashboard/keys`).
+
+Model ids are fal endpoint paths prefixed with the provider: `fal/<endpoint-id>`.
+The `fal-ai/` owner prefix may be omitted (`fal/veo3.1` == `fal/fal-ai/veo3.1`).
+
+```bash
+curl -sS "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"fal/fal-ai/veo3.1","prompt":"a serene lake at sunset","duration":8,"resolution":"1080p","ratio":"16:9","audio":true}'
+```
+
+```bash
+# image-to-video, one blocking call
+curl -sS "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"fal/bytedance/seedance-2.5/image-to-video","prompt":"the cat turns and walks away","image":"https://example.com/cat.png"}'
+```
+
+### One body, every model
+
+Every field except `model` is optional, so a prompt-only request works against
+all 119 endpoints. Fields an endpoint does not accept are dropped before the
+request leaves, and loose values snap into whatever that endpoint's schema
+declares — the same `"duration": 8` becomes Veo's `"8s"`, Kling's `"10"` and
+Sora's `8`; `"size": "1280x720"` becomes `resolution` + `aspect_ratio` (or
+`target_resolution`) wherever those exist.
+
+Generic names cross-map onto each endpoint's own field: `image` → `image_url` /
+`start_image_url` / `first_frame_url`, `last_frame` → `end_image_url` /
+`tail_image_url`, `video` → `video_url`, `reference_images` → `image_urls` /
+`reference_image_urls`, `audio` → `generate_audio`, `ratio` → `aspect_ratio`.
+Engine-variant fields (Topaz/SeedVR/BiRefNet/Sora model names) are sent as
+`model_variant`, since `model` itself is the 9Router routing id.
+
+A required media field that is missing is a local **400** naming the field in
+generic terms, not a FAILED task minutes later:
+
+```
+fal video: fal-ai/veo3.1/image-to-video requires 'image' (source / first frame image URL)
+```
+
+### Families
+
+| Family | Example ids |
+|---|---|
+| Veo 3.1 | `fal-ai/veo3.1`, `/fast`, `/lite`, `/image-to-video`, `/reference-to-video`, `/first-last-frame-to-video`, `/extend-video` |
+| Sora 2 | `fal-ai/sora-2/text-to-video`, `/image-to-video`, `/video-to-video/remix`, `/characters` |
+| Kling | `fal-ai/kling-video/{v1,v1.5,v1.6,v2,v2.1,v2.5-turbo,v2.6,v3,o1,o3}/...`, `/lipsync/*`, `/effects`, `/motion-control`, `/ai-avatar` |
+| Seedance | `fal-ai/bytedance/seedance/v1{,.5}/...`, `bytedance/seedance-2.0/...`, `bytedance/seedance-2.5/...` |
+| ByteDance other | `fal-ai/bytedance/dreamactor/v2`, `/omnihuman/v1.5`, `/video-stylize` |
+| Upscale / restore | `fal-ai/topaz/upscale/video`, `topaz/upscale/video/{generative,precision}`, `fal-ai/seedvr/upscale/video` |
+| Matting / background | `fal-ai/birefnet/{,v2/}video`, `bria/video/background-removal{,/v3}`, `bria/video/increase-resolution` |
+| xAI | `xai/grok-imagine-video/{text,image}-to-video` |
+
+Ask 9Router which fields a model takes: `GET /v1/models/info?id=fal/fal-ai/veo3.1`
+returns its `params` and `capabilities`.
 
 ## Notes & limits
 

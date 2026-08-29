@@ -108,10 +108,16 @@ function buildAdapterRequest({ provider, requestId, rawBody, contentType, creden
   };
 }
 
-/** Run the adapter's normalizer over a successful upstream body. */
-function normalizeAdapterResponse(adapter, requestId, bodyText) {
+/**
+ * Run the adapter's normalizer over a successful upstream body.
+ *
+ * A poll normalizer may need a second upstream call to finish the job (fal's
+ * queue reports completion on one URL and serves the output from another), so it
+ * receives the poll context and may be async — hence the await here.
+ */
+async function normalizeAdapterResponse(adapter, requestId, bodyText, context) {
   const payload = JSON.parse(bodyText);
-  return requestId ? adapter.normalizePoll(payload) : adapter.normalizeCreate(payload);
+  return requestId ? await adapter.normalizePoll(payload, context) : adapter.normalizeCreate(payload);
 }
 
 /** Abortable delay: rejects as soon as the client goes away. */
@@ -184,7 +190,7 @@ async function awaitVideoCompletion({ adapter, provider, created, credentials, s
       const res = await fetch(url, { headers, signal: combineSignals(signal, VIDEO_FETCH_TIMEOUT_MS) });
       const text = await res.text().catch(() => "");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      payload = adapter.normalizePoll(JSON.parse(text));
+      payload = await adapter.normalizePoll(JSON.parse(text), { credentials, requestId: taskId, signal });
     } catch (error) {
       if (signal?.aborted) return last;
       if (++failures >= AWAIT_MAX_POLL_FAILURES) {
@@ -268,7 +274,10 @@ export async function handleVideoProxyCore({
     fetch(url, {
       method,
       headers: translated
-        ? { ...translated.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+        // An adapter that set its own Authorization keeps it — fal authenticates
+        // with `Key <token>`, and a Bearer header would be rejected. Adapters
+        // that leave it unset still get the bearer default.
+        ? { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...translated.headers }
         : buildHeaders({ token, contentType: method === "POST" ? contentType : null, idempotencyKey: method === "POST" ? idempotencyKey : null }),
       body: translated ? translated.body : method === "POST" ? rawBody : undefined,
       signal: fetchSignal,
@@ -325,7 +334,7 @@ export async function handleVideoProxyCore({
   if (translated) {
     let normalized;
     try {
-      normalized = normalizeAdapterResponse(translated.adapter, requestId, bodyText);
+      normalized = await normalizeAdapterResponse(translated.adapter, requestId, bodyText, { credentials, requestId, signal });
     } catch (error) {
       return createErrorResult(
         HTTP_STATUS.BAD_GATEWAY,

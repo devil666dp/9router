@@ -19,9 +19,24 @@
   `GET /v1/videos/{id}` finishes it — the job is never re-created. xAI keeps its
   byte-for-byte proxy and its existing create-then-poll flow
 
+- **Providers**: `fal-ai` gains video generation — 119 endpoints across every
+  family fal publishes (Veo 3.1, Sora 2, Kling o1/o3/v1-v3 + lipsync/effects/
+  motion-control/avatar, Seedance v1/v1.5/2.0/2.5, Bytedance Dreamactor /
+  Omnihuman / video-stylize, BiRefNet, Bria, SeedVR, Topaz, xAI Grok Imagine)
+- **Video**: the fal adapter is fully config-driven — one `SPECS` line per
+  endpoint declares each accepted field's name, type, required-ness and enum, and
+  everything else derives from it: which fields are forwarded, how loose values
+  snap into enums (`duration: 8` becomes Veo's `"8s"`, Kling's `"10"`, Sora's
+  `8`), the local 400 wording for missing media, and the registry `params` the
+  dashboard renders. Adding a model or field is one line, no code change
+- **Video**: `size: "1280x720"` is translated into whichever of `resolution` /
+  `aspect_ratio` / `target_resolution` an endpoint actually accepts
+
 ## Fixes
 - **API**: `/v1/models/info` reported `endpoint: null` for video models — now
   `/v1/videos/generations`
+- **Video**: an adapter-supplied `Authorization` header is no longer overwritten
+  with a bearer token (fal authenticates with `Key <token>`)
 
 # v0.5.55 (2026-08-14)
 
