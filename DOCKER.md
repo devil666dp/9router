@@ -1,6 +1,6 @@
 # Docker
 
-Run 9Router in a container. Published image: [`decolua/9router`](https://hub.docker.com/r/decolua/9router) — multi-platform `linux/amd64` + `linux/arm64`.
+Run 9Router in a container. Published image: [`dipandhali2021/9router`](https://hub.docker.com/r/dipandhali2021/9router) — multi-platform `linux/amd64` + `linux/arm64`.
 
 ---
 
@@ -14,7 +14,7 @@ docker run -d \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   --name 9router \
-  decolua/9router:latest
+  dipandhali2021/9router:latest
 ```
 
 App listens on port `20128`. Open: http://localhost:20128
@@ -61,7 +61,7 @@ docker run -d \
   -e HOSTNAME=0.0.0.0 \
   -e DEBUG=true \
   --name 9router \
-  decolua/9router:latest
+  dipandhali2021/9router:latest
 ```
 
 ## Optional Headroom sidecar
@@ -71,7 +71,7 @@ The 9Router image does not bundle Python or Headroom. To use Headroom in Docker,
 ```yaml
 services:
   9router:
-    image: decolua/9router:latest
+    image: dipandhali2021/9router:latest
     ports:
       - "20128:20128"
     volumes:
@@ -95,7 +95,7 @@ If Headroom runs on the Docker host instead of as a sidecar, use `http://host.do
 ## Update to latest
 
 ```bash
-docker pull decolua/9router:latest
+docker pull dipandhali2021/9router:latest
 docker rm -f 9router
 # re-run the quick start command
 ```
@@ -115,18 +115,69 @@ docker run --rm -p 20128:20128 \
   9router
 ```
 
-## Publish (automatic via CI)
+## Publish
 
-Push a git tag `v*` → GitHub Actions builds multi-platform (amd64+arm64) and pushes to:
-- `ghcr.io/decolua/9router:v{version}` + `:latest`
-- `decolua/9router:v{version}` + `:latest`
+Images go to two registries at once:
+- `dipandhali2021/9router` on Docker Hub
+- `ghcr.io/dipandhali2021/9router` on GHCR
+
+### One-time setup
+
+The workflow authenticates to Docker Hub with two repository secrets. Create a
+[Docker Hub access token](https://hub.docker.com/settings/security) with
+**Read & Write**, then:
 
 ```bash
-# Use scripts/release.js (recommended)
-node scripts/release.js "Release title" "Notes"
-
-# Or manually
-git tag v0.4.x && git push origin v0.4.x
+gh secret set DOCKERHUB_USERNAME -R dipandhali2021/9router --body dipandhali2021
+gh secret set DOCKERHUB_TOKEN    -R dipandhali2021/9router   # paste the token
 ```
 
-Workflow: `app/.github/workflows/docker-publish.yml`
+GHCR needs nothing — it uses the workflow's own `GITHUB_TOKEN`.
+
+### Release build (git tag)
+
+```bash
+node scripts/release.js "Release title" "Notes"   # recommended
+# or
+git tag v0.5.56 && git push origin v0.5.56
+```
+
+A `v*` tag builds amd64 + arm64 and publishes `:{version}` plus `:latest`.
+
+### Manual build (any branch, no tag)
+
+```bash
+# tag defaults to the version in package.json
+gh workflow run docker-publish.yml -R dipandhali2021/9router --ref <branch>
+
+# explicit tag, and leave :latest where it is
+gh workflow run docker-publish.yml -R dipandhali2021/9router --ref <branch> \
+  -f tag=0.5.56-fal -f latest=false
+```
+
+Watch it with `gh run watch -R dipandhali2021/9router`. The run summary lists
+every tag it pushed.
+
+Workflow: `.github/workflows/docker-publish.yml`
+
+### Build locally instead
+
+Build from the repo root — the Dockerfile's `COPY . ./` expects that context.
+
+```bash
+docker login -u dipandhali2021
+
+# single-arch, fastest
+docker build -t dipandhali2021/9router:latest .
+docker push dipandhali2021/9router:latest
+
+# multi-arch, same as CI
+docker buildx create --use --name 9router 2>/dev/null || docker buildx use 9router
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t "dipandhali2021/9router:$(node -p "require('./package.json').version")" \
+  -t dipandhali2021/9router:latest \
+  --provenance=false --sbom=false --push .
+```
+
+`.dockerignore` excludes `.env`, `data/` and `node_modules`, so no local
+credentials or state end up in the published layers.

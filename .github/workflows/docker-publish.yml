@@ -5,10 +5,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. 0.5.55). Defaults to the version in package.json."
+        required: false
+        type: string
+      latest:
+        description: "Also move the :latest tag to this build"
+        required: false
+        default: true
+        type: boolean
 
 env:
   GHCR_IMAGE: ghcr.io/${{ github.repository }}
-  DOCKERHUB_IMAGE: decolua/9router
+  DOCKERHUB_IMAGE: dipandhali2021/9router
 
 jobs:
   build-and-push:
@@ -19,6 +29,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -35,6 +47,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # A manual run has no tag to read a version from, so it falls back to the
+      # version in package.json — keeping hand-triggered builds tagged the same
+      # way CI tags a release.
+      - name: Resolve manual tag
+        if: github.event_name == 'workflow_dispatch'
+        id: manual
+        run: echo "version=${{ inputs.tag || '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Read package version
+        if: github.event_name == 'workflow_dispatch' && steps.manual.outputs.version == ''
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -44,7 +69,8 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.manual.outputs.version || steps.pkg.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || inputs.latest }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -58,3 +84,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: false
           sbom: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### Pushed images"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
