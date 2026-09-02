@@ -13,6 +13,7 @@ import runwayml from "./runwayml.js";
 import cloudflareAi from "./cloudflareAi.js";
 import antigravity from "./antigravity.js";
 import qwen from "./qwen.js";
+import replicate from "./replicate.js";
 
 const ADAPTERS = {
   openai: createOpenAIAdapter("openai"),
@@ -34,6 +35,7 @@ const ADAPTERS = {
   runwayml,
   "cloudflare-ai": cloudflareAi,
   qwen,
+  replicate,
 };
 
 export function getImageAdapter(provider) {

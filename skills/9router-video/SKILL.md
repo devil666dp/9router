@@ -1,19 +1,20 @@
 ---
 name: 9router-video
-description: Generate videos via 9Router /v1/videos/generations - xAI Grok Imagine (async: submit, poll request_id, download MP4), Qwen/DashScope Wan + HappyHorse, and fal.ai (Veo 3.1, Sora 2, Kling, Seedance, Topaz, SeedVR and more) which both return the finished video from one blocking call. Use when the user wants to create, generate, or render a video, text-to-video (txt2vid), image-to-video, reference-to-video, video editing, upscaling, lipsync, or character swap.
+description: Generate videos via 9Router /v1/videos/generations - xAI Grok Imagine (async: submit, poll request_id, download MP4), Qwen/DashScope Wan + HappyHorse, fal.ai (Veo 3.1, Sora 2, Kling, Seedance, Topaz, SeedVR and more) and Replicate (Veo, Sora 2, Kling, Seedance, Wan, Hailuo, Ray, Pixverse, lipsync and upscalers), which all return the finished video from one blocking call. Use when the user wants to create, generate, or render a video, text-to-video (txt2vid), image-to-video, reference-to-video, video editing, upscaling, lipsync, or character swap.
 ---
 
 # 9Router — Video Generation
 
 Requires `NINEROUTER_URL` (and `NINEROUTER_KEY` if auth enabled). See https://raw.githubusercontent.com/decolua/9router/refs/heads/master/skills/9router/SKILL.md for setup.
 
-Three providers, one endpoint set:
+Four providers, one endpoint set:
 
 | Provider | Models | How a create call answers |
 |---|---|---|
 | `xai` | `grok-imagine-video` | returns `{"request_id"}`, you poll |
 | `qwen` | Wan 3.0 / 2.7 / 2.6 / 2.5 / 2.2 / 2.1, HappyHorse 1.1/1.0, VACE, animate | **blocks until the render finishes** and returns `{"status":"done","video":{"url"}}` |
 | `fal` | Veo 3.1, Sora 2, Kling, Seedance, Dreamactor, Omnihuman, BiRefNet, Bria, SeedVR, Topaz, Grok Imagine — 119 endpoints | **blocks until the render finishes** and returns `{"status":"done","video":{"url"}}` |
+| `replicate` | Veo 3.1/3/2, Sora 2, Kling v3/o1/v2.x, Seedance 2.5/2.0/1.x, Wan 3/2.7-2.1, Hailuo, Ray 3.2, Pixverse v6, lipsync, upscalers — 105 models | **blocks until the render finishes** and returns `{"status":"done","video":{"url"}}` |
 
 ## xAI Grok Imagine
 
@@ -185,6 +186,97 @@ fal video: fal-ai/veo3.1/image-to-video requires 'image' (source / first frame i
 
 Ask 9Router which fields a model takes: `GET /v1/models/info?id=fal/fal-ai/veo3.1`
 returns its `params` and `capabilities`.
+
+## Replicate
+
+Requires a connected **Replicate API token** in the dashboard (`https://replicate.com/account/api-tokens`).
+
+Model ids are Replicate `owner/name` paths prefixed with the provider:
+`replicate/google/veo-3.1`. `parseModel` splits on the first slash only, so the
+owner stays part of the model id. Pin an exact build by appending
+`:<version-hash>` — 18 of the 105 video models are community models and already
+carry a pinned version, so you never need to look one up.
+
+Upstream is the prediction API, which is async, but 9Router waits the render out:
+one `POST /v1/videos/generations` returns the finished video. If it outlives
+`VIDEO_AWAIT_TIMEOUT_MS` (default 15 min), the response falls back to
+`{"request_id","status":"processing"}` and `GET /v1/videos/{request_id}` finishes
+the job — the billable create is never re-sent.
+
+```bash
+curl -X POST "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"replicate/google/veo-3.1","prompt":"a serene lake at sunset","duration":8,"resolution":"1080p","ratio":"16:9","audio":true}'
+# -> {"id":"s7k2…","request_id":"s7k2…","status":"done","video":{"url":"https://…mp4"}}
+```
+
+```bash
+# image-to-video
+curl -X POST "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"replicate/kwaivgi/kling-v2.5-turbo-pro","prompt":"the cat turns and walks away","image":"https://example.com/cat.png","duration":5}'
+
+# lipsync: an existing clip plus driving audio
+curl -X POST "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"replicate/sync/lipsync-2","video":"https://example.com/clip.mp4","audio":"https://example.com/voice.mp3","sync_mode":"loop"}'
+
+# upscale
+curl -X POST "$NINEROUTER_URL/v1/videos/generations" \
+  -H "Authorization: Bearer $NINEROUTER_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"replicate/topazlabs/video-upscale","video":"https://example.com/clip.mp4","resolution":"4k"}'
+```
+
+### One body, every model
+
+Every field except `model` is optional, so a prompt-only request works against
+all 105 models. Fields a model does not accept are **dropped** before the request
+leaves (Replicate 422s on unknown input keys), and loose values snap into
+whatever that model's schema declares — the same `"duration": 8` becomes Veo's
+`8`, Kling's nearest of `5`/`10` and Sora's `seconds: 8`;
+`"resolution": "4k"` reaches Topaz's `target_resolution`, and `"1080p"` reaches
+Pixverse's `quality`.
+
+Generic names cross-map onto each model's own field: `image` → `start_image` /
+`first_frame_image` / `input_reference`, `last_frame` → `end_image` /
+`last_image`, `video` → `input_video` / `video_url` / `mp4` / `media`,
+`reference_images` → `images` / `concepts`, `audio` → `audio_file` /
+`audio_input` (and → `generate_audio` on the models where it is a switch),
+`ratio` → `aspect_ratio`, `duration` → `seconds`, `fps` → `frame_rate` /
+`target_fps`, `resolution` → `target_resolution` / `quality`. Engine-variant
+fields are sent as `model_variant`, since `model` itself is the routing id.
+
+`size: "1280x720"` is translated into whichever of `resolution` (as a tier),
+`aspect_ratio` or explicit `width`/`height` a model actually accepts.
+
+A required media field that is missing is a local **400** naming the field in
+generic terms, not a FAILED prediction minutes later:
+
+```
+replicate video: sync/lipsync-2 requires 'video' (source video URL)
+```
+
+### Families
+
+| Family | Example ids |
+|---|---|
+| Veo | `google/veo-3.1`, `/veo-3.1-fast`, `/veo-3.1-lite`, `google/veo-3`, `/veo-3-fast`, `google/veo-2` |
+| Sora 2 | `openai/sora-2`, `openai/sora-2-pro` (both take your own `openai_api_key`) |
+| Kling | `kwaivgi/kling-v3-video`, `/kling-v3-omni-video`, `/kling-o1`, `/kling-v2.6`, `/kling-v2.5-turbo-pro`, `/kling-v2.1{,-master}`, `/kling-v2.0`, `/kling-v1.6-{pro,standard}`, `/kling-lip-sync` |
+| Seedance | `bytedance/seedance-2.5`, `/seedance-2.0{,-fast}`, `/seedance-1.5-pro`, `/seedance-1-pro{,-fast}`, `/seedance-1-lite` |
+| Wan | `wan-video/wan-2.7-{t2v,i2v,r2v,videoedit}`, `/wan-2.6-{t2v,i2v}`, `/wan-2.5-{t2v,i2v}{,-fast}`, `/wan-2.2-{i2v-a14b,i2v-fast,t2v-fast,s2v}`, `/wan-2.1-1.3b`, `wavespeedai/wan-2.1-{t2v,i2v}-{480p,720p}`, `alibaba/wan-3{,-prime}`, `alibaba/happyhorse-1.{0,1}` |
+| MiniMax Hailuo | `minimax/hailuo-2.3{,-fast}`, `/hailuo-02`, `/video-01{,-director,-live}` |
+| Luma Ray | `luma/ray-3.2`, `/ray-2-{540p,720p}`, `/ray-flash-2-{540p,720p}`, `/modify-video`, `/reframe-video` |
+| Pixverse | `pixverse/pixverse-v6`, `/pixverse-v5.6`, `/pixverse-v5`, `/pixverse-v4.5`, `/pixverse-v4`, `/lipsync` |
+| Avatar / lipsync | `sync/lipsync-2{,-pro}`, `heygen/lipsync-{speed,precision}`, `bytedance/omni-human`, `/latentsync`, `/dreamactor-m2.0`, `veed/fabric-1.0`, `prunaai/p-video-avatar`, `zsxkib/multitalk`, `tmappdev/lipsync` |
+| Upscale / restore / interpolate | `topazlabs/video-upscale`, `philz1337x/crystal-video-upscaler`, `zsxkib/seedvr2`, `lucataco/real-esrgan-video`, `zsxkib/film-frame-interpolation-for-large-motion` |
+| Matting / audio / captions | `arielreplicate/robust_video_matting`, `meta/sam-2-video`, `zsxkib/mmaudio`, `fictions-ai/autocaption` |
+| Other | `xai/grok-imagine-video{,-1.5,-extension}`, `runwayml/gen-4.5`, `vidu/q3-{pro,turbo}`, `leonardoai/motion-2.0`, `tencent/hunyuan-video`, `zsxkib/hunyuan-video2video`, `lightricks/ltx-video{,-0.9.7,-0.9.7-distilled}`, `genmoai/mochi-1`, `cuuupid/cogvideox-5b`, `zsxkib/pyramid-flow`, `prunaai/p-video{,-animate}` |
+
+Ask 9Router which fields a model takes:
+`GET /v1/models/info?id=replicate/google/veo-3.1` returns its `params` and
+`capabilities` (`text2video` 69, `image2video` 73, `reference2video` 15,
+`videoedit` 29 across the 105 models).
 
 ## Notes & limits
 

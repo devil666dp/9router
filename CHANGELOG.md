@@ -32,6 +32,47 @@
 - **Video**: `size: "1280x720"` is translated into whichever of `resolution` /
   `aspect_ratio` / `target_resolution` an endpoint actually accepts
 
+- **Providers**: add `replicate` (replicate.com) as a media provider — 94 image
+  models and 105 video models behind Replicate's single prediction API. Images:
+  GPT Image 1/1.5/2, FLUX.2 (max/pro/flex/dev/klein) and FLUX.1 (pro/ultra/dev/
+  schnell/kontext/fill/canny/depth/redux), Seedream 3/4/4.5/5-lite, Imagen 3/4,
+  Nano Banana 1/2/Pro, Ideogram v2/v3, Recraft v3/v4 (+SVG), Qwen-Image (+edit),
+  HiDream, Z-Image, SDXL, SD 3.5, Bria, Luma Photon, Hunyuan Image 3, Riverflow,
+  Arrow 1.1 and the upscalers (Topaz, Clarity, Real-ESRGAN, Aura-SR). Video: Veo
+  3.1/3/2, Sora 2 (+Pro), Kling v3/o1/v2.6/v2.5/v2.1/v2.0/v1.6 + lip-sync,
+  Seedance 2.5/2.0/1.5/1.x, Wan 3/2.7/2.6/2.5/2.2/2.1, HappyHorse, Hailuo 2.3/02
+  + video-01, Ray 3.2/2, Pixverse v4-v6, Dreamactor, OmniHuman, Grok Imagine,
+  Gen-4.5, Vidu Q3, Motion 2.0, HunyuanVideo, LTX-Video, Mochi 1, CogVideoX, and
+  the lipsync / upscale / matting / audio / caption tools
+- **Media**: both Replicate adapters are fully config-driven — one `SPECS` line
+  per model declares each accepted field's name, type, required-ness and enum,
+  and everything else derives from it: which fields are forwarded, how loose
+  values snap into enums, which media a model requires, the local 400 wording
+  when it is missing, and the registry `params`/`capabilities` the dashboard
+  renders. Adding a model, or a field on one, is one line and no code change
+- **Media**: one common request body across all 199 models — every field except
+  `model` is optional, generic names (`image`, `images`, `mask_image`, `n`,
+  `last_frame`, `video`, `reference_images`, `audio`, `ratio`, `duration`,
+  `resolution`, `fps`, `upscale_factor`) resolve to whatever each model calls
+  them, and anything a model does not accept is dropped rather than forwarded
+  (Replicate 422s on unknown input keys)
+- **Media**: `size` is translated into whichever of an exact enum entry, a
+  resolution tier, an aspect ratio or explicit `width`/`height` a model accepts —
+  `"2048x2048"` reaches Nano Banana Pro's `resolution: "2K"` and `"1024x1536"`
+  reaches GPT Image 2's `aspect_ratio: "2:3"`. Numbers snap to the nearest
+  declared option, including labelled ones (`upscale_factor: 4` → Topaz's `"4x"`)
+- **Media**: capabilities are derived from each model's own schema instead of
+  declared per model, so the dashboard's edit/mask/image2video affordances cannot
+  drift from what the request builder accepts — a required image input means
+  edit-only, an optional one means both
+- **Video**: a Replicate create is awaited server-side like qwen and fal, so
+  `POST /v1/videos/generations` answers with the finished video; if the render
+  outlives `VIDEO_AWAIT_TIMEOUT_MS` the response falls back to the prediction id
+  and `GET /v1/videos/{id}` finishes it — the billable create is never re-sent
+- **Image**: fast Replicate models (FLUX schnell, SDXL) return their images from
+  the create POST via `Prefer: wait=60`; slower ones come back still running and
+  are polled inside the adapter, so a single call always returns finished images
+
 ## Fixes
 - **API**: `/v1/models/info` reported `endpoint: null` for video models — now
   `/v1/videos/generations`

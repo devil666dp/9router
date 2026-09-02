@@ -8,10 +8,12 @@
 // same `{request_id}` / `{status, video:{url}}` contract clients already poll.
 import qwen from "./qwen.js";
 import falAi from "./falAi.js";
+import replicate from "./replicate.js";
 
 const ADAPTERS = {
   qwen,
   "fal-ai": falAi,
+  replicate,
 };
 
 export function getVideoAdapter(provider) {
