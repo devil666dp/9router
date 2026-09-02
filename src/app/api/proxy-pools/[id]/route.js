@@ -5,8 +5,15 @@ import {
   getProxyPoolById,
   updateProxyPool,
 } from "@/models";
+import {
+  isRelayProxyType,
+  normalizeProxyPoolType,
+  normalizeProxyUrlForType,
+} from "@/shared/constants/proxyTypes";
 
-function normalizeProxyPoolUpdate(body = {}) {
+// `existing` supplies the type when the patch does not carry one, so a URL edit
+// on a relay pool is still validated as a relay URL.
+function normalizeProxyPoolUpdate(body = {}, existing = {}) {
   const updates = {};
 
   if (Object.prototype.hasOwnProperty.call(body, "name")) {
@@ -17,12 +24,31 @@ function normalizeProxyPoolUpdate(body = {}) {
     updates.name = name;
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "type")) {
+    updates.type = normalizeProxyPoolType(body?.type);
+  }
+
+  const type = updates.type ?? normalizeProxyPoolType(existing?.type);
+
   if (Object.prototype.hasOwnProperty.call(body, "proxyUrl")) {
     const proxyUrl = typeof body?.proxyUrl === "string" ? body.proxyUrl.trim() : "";
     if (!proxyUrl) {
-      return { error: "Proxy URL is required" };
+      return { error: isRelayProxyType(type) ? "Relay URL is required" : "Proxy URL is required" };
     }
-    updates.proxyUrl = proxyUrl;
+
+    const normalizedUrl = normalizeProxyUrlForType(proxyUrl, type);
+    if (normalizedUrl.error) {
+      return { error: normalizedUrl.error };
+    }
+    updates.proxyUrl = normalizedUrl.proxyUrl;
+  } else if (updates.type && updates.type !== normalizeProxyPoolType(existing?.type)) {
+    // Type switched without a new URL — re-validate the stored one so a pool
+    // cannot end up as a relay pointing at an HTTP proxy URL.
+    const normalizedUrl = normalizeProxyUrlForType(existing?.proxyUrl || "", updates.type);
+    if (normalizedUrl.error) {
+      return { error: normalizedUrl.error };
+    }
+    updates.proxyUrl = normalizedUrl.proxyUrl;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, "noProxy")) {
@@ -35,11 +61,6 @@ function normalizeProxyPoolUpdate(body = {}) {
 
   if (Object.prototype.hasOwnProperty.call(body, "strictProxy")) {
     updates.strictProxy = body?.strictProxy === true;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, "type")) {
-    const validTypes = ["http", "vercel", "cloudflare"];
-    updates.type = validTypes.includes(body?.type) ? body.type : "http";
   }
 
   return { updates };
@@ -77,7 +98,7 @@ export async function PUT(request, { params }) {
     }
 
     const body = await request.json();
-    const normalized = normalizeProxyPoolUpdate(body);
+    const normalized = normalizeProxyPoolUpdate(body, existing);
 
     if (normalized.error) {
       return NextResponse.json({ error: normalized.error }, { status: 400 });

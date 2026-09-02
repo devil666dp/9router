@@ -72,8 +72,36 @@
 - **Image**: fast Replicate models (FLUX schnell, SDXL) return their images from
   the create POST via `Prefer: wait=60`; slower ones come back still running and
   are polled inside the adapter, so a single call always returns finished images
+- **Proxy pools**: relays can be registered by hand instead of only deployed from
+  here — the relay menu now splits "Deploy new" from "Already deployed", where
+  `Import relay URL` and `Import relay URLs in bulk` take the URL of a Vercel /
+  Cloudflare / Deno relay you deployed yourself. Nothing about a relay pool
+  depends on 9router having created it, so an imported one routes, health-checks
+  and binds to connections exactly like a deployed one
+- **Proxy pools**: the add/edit modal gained a Type selector, so a pool's type is
+  no longer fixed by which button opened the form, and pasting a relay URL sets
+  the type from its hostname (`*.vercel.app`, `*.workers.dev`, `*.deno.net` /
+  `.deno.dev`) and names the pool after its subdomain until you type your own
+  name. Labels, placeholders, hints and the strict-mode copy all follow the
+  selected type, and batch import parses relay URLs per line — a mixed paste
+  lands each line on its own platform, falling back to the selected type
+- **Proxy pools**: the type list moved to `src/shared/constants/proxyTypes.js`,
+  shared by the dashboard, the proxy-pools API and runtime proxy resolution, so
+  adding a relay platform is one entry there rather than four hardcoded lists
 
 ## Fixes
+- **Proxy pools**: `PUT /api/proxy-pools/[id]` validated `type` against a list
+  that predated the Deno relay, so editing a Deno pool silently reset it to
+  `http` and sent its traffic through a proxy agent instead of relay headers
+- **Proxy pools**: a relay URL is now rejected at save time unless it is an
+  absolute http(s) URL with no embedded credentials — an HTTP proxy URL stored
+  under a relay type used to fail later inside `fetch` ("cannot be constructed
+  from a URL that includes credentials"). Switching an existing pool's type
+  re-validates the stored URL for the same reason
+- **Proxy pools**: the relay health check probed one fixed target
+  (`httpbin.org`), so a working relay was marked dead whenever that target was
+  down; it now tries several and only fails the pool when every target fails,
+  and reports "Relay" rather than "Proxy" in the recorded error
 - **API**: `/v1/models/info` reported `endpoint: null` for video models — now
   `/v1/videos/generations`
 - **Video**: an adapter-supplied `Authorization` header is no longer overwritten

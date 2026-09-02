@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createProxyPool, getProviderConnections, getProxyPools } from "@/models";
+import {
+  isRelayProxyType,
+  normalizeProxyPoolType,
+  normalizeProxyUrlForType,
+} from "@/shared/constants/proxyTypes";
 
 function toBoolean(value) {
   if (value === "true") return true;
@@ -7,25 +12,28 @@ function toBoolean(value) {
   return undefined;
 }
 
-const VALID_PROXY_TYPES = ["http", "vercel", "cloudflare", "deno"];
-
 function normalizeProxyPoolInput(body = {}) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const proxyUrl = typeof body?.proxyUrl === "string" ? body.proxyUrl.trim() : "";
   const noProxy = typeof body?.noProxy === "string" ? body.noProxy.trim() : "";
   const isActive = body?.isActive === undefined ? true : body.isActive === true;
   const strictProxy = body?.strictProxy === true;
-  const type = VALID_PROXY_TYPES.includes(body?.type) ? body.type : "http";
+  const type = normalizeProxyPoolType(body?.type);
 
   if (!name) {
     return { error: "Name is required" };
   }
 
   if (!proxyUrl) {
-    return { error: "Proxy URL is required" };
+    return { error: isRelayProxyType(type) ? "Relay URL is required" : "Proxy URL is required" };
   }
 
-  return { name, proxyUrl, noProxy, isActive, strictProxy, type };
+  const normalizedUrl = normalizeProxyUrlForType(proxyUrl, type);
+  if (normalizedUrl.error) {
+    return { error: normalizedUrl.error };
+  }
+
+  return { name, proxyUrl: normalizedUrl.proxyUrl, noProxy, isActive, strictProxy, type };
 }
 
 function buildUsageMap(connections = []) {

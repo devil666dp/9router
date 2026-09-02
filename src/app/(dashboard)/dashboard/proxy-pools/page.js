@@ -1,8 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, Input, Modal, Select, Toggle, ConfirmModal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import {
+  DEFAULT_PROXY_POOL_TYPE,
+  PROXY_POOL_TYPES,
+  RELAY_PROXY_POOL_TYPES,
+  detectRelayType,
+  getProxyPoolType,
+  isRelayProxyType,
+  isValidRelayUrl,
+  normalizeProxyUrlForType,
+  relayNameFromUrl,
+} from "@/shared/constants/proxyTypes";
+
+const TYPE_OPTIONS = PROXY_POOL_TYPES.map((entry) => ({ value: entry.value, label: entry.label }));
 
 function getStatusVariant(status) {
   if (status === "active") return "success";
@@ -22,6 +35,7 @@ function normalizeFormData(data = {}) {
     name: data.name || "",
     proxyUrl: data.proxyUrl || "",
     noProxy: data.noProxy || "",
+    type: data.type || DEFAULT_PROXY_POOL_TYPE,
     isActive: data.isActive !== false,
     strictProxy: data.strictProxy === true,
   };
@@ -39,6 +53,7 @@ export default function ProxyPoolsPage() {
   const [editingProxyPool, setEditingProxyPool] = useState(null);
   const [formData, setFormData] = useState(normalizeFormData());
   const [batchImportText, setBatchImportText] = useState("");
+  const [batchImportType, setBatchImportType] = useState(DEFAULT_PROXY_POOL_TYPE);
   const [vercelForm, setVercelForm] = useState({ vercelToken: "", projectName: "vercel-relay" });
   const [cloudflareForm, setCloudflareForm] = useState({ accountId: "", apiToken: "", projectName: "cloudflare-relay" });
   const [denoForm, setDenoForm] = useState({ denoToken: "", orgDomain: "", projectName: "" });
@@ -89,8 +104,9 @@ export default function ProxyPoolsPage() {
     setFormData(normalizeFormData());
   };
 
-  const openCreateModal = () => {
-    resetForm();
+  const openCreateModal = (type = DEFAULT_PROXY_POOL_TYPE) => {
+    setEditingProxyPool(null);
+    setFormData(normalizeFormData({ type }));
     setShowFormModal(true);
   };
 
@@ -105,16 +121,40 @@ export default function ProxyPoolsPage() {
     resetForm();
   };
 
+  // A relay URL identifies its own platform, so a pasted URL switches the type
+  // rather than being rejected for not matching the one selected. The name
+  // tracks the relay's subdomain while it still matches what the previous URL
+  // derived — once the user types their own name, it is left alone.
+  const handleProxyUrlChange = (value) => {
+    setFormData((prev) => {
+      const type = detectRelayType(value) || prev.type;
+      const previousAutoName = isRelayProxyType(prev.type) ? relayNameFromUrl(prev.proxyUrl) : "";
+      const nameIsDerived = !prev.name.trim() || prev.name === previousAutoName;
+      const name = nameIsDerived && isRelayProxyType(type)
+        ? (relayNameFromUrl(value) || prev.name)
+        : prev.name;
+      return { ...prev, proxyUrl: value, type, name };
+    });
+  };
+
   const handleSave = async () => {
     const payload = {
       name: formData.name.trim(),
       proxyUrl: formData.proxyUrl.trim(),
       noProxy: formData.noProxy.trim(),
+      type: formData.type || DEFAULT_PROXY_POOL_TYPE,
       isActive: formData.isActive === true,
       strictProxy: formData.strictProxy === true,
     };
 
     if (!payload.name || !payload.proxyUrl) return;
+
+    const normalizedUrl = normalizeProxyUrlForType(payload.proxyUrl, payload.type);
+    if (normalizedUrl.error) {
+      notify.error(normalizedUrl.error);
+      return;
+    }
+    payload.proxyUrl = normalizedUrl.proxyUrl;
 
     setSaving(true);
     try {
@@ -332,8 +372,9 @@ export default function ProxyPoolsPage() {
     setSelectedIds((prev) => prev.filter((id) => proxyPools.some((p) => p.id === id)));
   }, [proxyPools]);
 
-  const openBatchImportModal = () => {
+  const openBatchImportModal = (type = DEFAULT_PROXY_POOL_TYPE) => {
     setBatchImportText("");
+    setBatchImportType(type);
     setShowBatchImportModal(true);
   };
 
@@ -370,6 +411,14 @@ export default function ProxyPoolsPage() {
   const closeDenoModal = () => {
     if (deploying) return;
     setShowDenoModal(false);
+  };
+
+  // Keyed by proxy type so the relay menu renders straight from
+  // RELAY_PROXY_POOL_TYPES — adding a platform is one entry there.
+  const RELAY_DEPLOY_OPENERS = {
+    vercel: openVercelModal,
+    cloudflare: openCloudflareModal,
+    deno: openDenoModal,
   };
 
   const handleVercelDeploy = async () => {
@@ -447,6 +496,28 @@ export default function ProxyPoolsPage() {
     }
   };
 
+  // Relay import: one URL per line. The platform comes from the hostname when it
+  // is recognisable, so a mixed paste lands on the right type without the user
+  // having to import each platform separately.
+  const parseRelayLine = (line, fallbackType) => {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+
+    if (!isValidRelayUrl(trimmed)) {
+      throw new Error("Expected a full relay URL, e.g. https://my-relay.vercel.app");
+    }
+
+    const type = detectRelayType(trimmed) || fallbackType;
+    const normalized = normalizeProxyUrlForType(trimmed, type);
+    if (normalized.error) throw new Error(normalized.error);
+
+    return {
+      proxyUrl: normalized.proxyUrl,
+      name: relayNameFromUrl(normalized.proxyUrl) || `Imported ${type} relay`,
+      type,
+    };
+  };
+
   const parseProxyLine = (line) => {
     const trimmed = line.trim();
     if (!trimmed) return null;
@@ -457,6 +528,7 @@ export default function ProxyPoolsPage() {
       return {
         proxyUrl: parsed.toString(),
         name: `Imported ${hostLabel}`,
+        type: DEFAULT_PROXY_POOL_TYPE,
       };
     }
 
@@ -472,6 +544,7 @@ export default function ProxyPoolsPage() {
       return {
         proxyUrl: parsed.toString(),
         name: `Imported ${host}:${port}`,
+        type: DEFAULT_PROXY_POOL_TYPE,
       };
     }
 
@@ -484,8 +557,10 @@ export default function ProxyPoolsPage() {
       .map((line) => line.trim())
       .filter(Boolean);
 
+    const importingRelays = isRelayProxyType(batchImportType);
+
     if (lines.length === 0) {
-      notify.warning("Please paste at least one proxy line.");
+      notify.warning(importingRelays ? "Please paste at least one relay URL." : "Please paste at least one proxy line.");
       return;
     }
 
@@ -494,7 +569,7 @@ export default function ProxyPoolsPage() {
 
     lines.forEach((line, index) => {
       try {
-        const parsed = parseProxyLine(line);
+        const parsed = importingRelays ? parseRelayLine(line, batchImportType) : parseProxyLine(line);
         if (parsed) {
           parsedEntries.push({
             ...parsed,
@@ -507,7 +582,7 @@ export default function ProxyPoolsPage() {
     });
 
     if (invalidLines.length > 0) {
-      notify.error(`Invalid proxy format:\n${invalidLines.join("\n")}`);
+      notify.error(`${importingRelays ? "Invalid relay URL" : "Invalid proxy format"}:\n${invalidLines.join("\n")}`);
       return;
     }
 
@@ -535,6 +610,7 @@ export default function ProxyPoolsPage() {
             name: entry.name,
             proxyUrl: entry.proxyUrl,
             noProxy: "",
+            type: entry.type,
             isActive: true,
           }),
         });
@@ -562,6 +638,14 @@ export default function ProxyPoolsPage() {
     () => proxyPools.filter((pool) => pool.isActive === true).length,
     [proxyPools]
   );
+
+  const formDescriptor = getProxyPoolType(formData.type);
+  const formIsRelay = formDescriptor.isRelay === true;
+  const proxyUrlError = formData.proxyUrl.trim()
+    ? normalizeProxyUrlForType(formData.proxyUrl.trim(), formData.type).error || null
+    : null;
+  const batchImportDescriptor = getProxyPoolType(batchImportType);
+  const batchImportIsRelay = batchImportDescriptor.isRelay === true;
 
   if (loading) {
     return (
@@ -594,45 +678,56 @@ export default function ProxyPoolsPage() {
             </Button>
 
             {showRelayMenu && (
-              <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-xl border border-black/10 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-zinc-900 sm:left-auto sm:right-0">
+              <div className="absolute left-0 top-full z-50 mt-1 w-60 rounded-xl border border-black/10 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-zinc-900 sm:left-auto sm:right-0">
+                <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  Deploy new
+                </p>
+                {RELAY_PROXY_POOL_TYPES.map((entry) => (
+                  <button
+                    key={entry.value}
+                    onClick={() => {
+                      RELAY_DEPLOY_OPENERS[entry.value]?.();
+                      setShowRelayMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <span className={`material-symbols-outlined text-[20px] ${entry.iconClassName}`}>{entry.icon}</span>
+                    {entry.label}
+                  </button>
+                ))}
+
+                <div className="my-1 border-t border-black/10 dark:border-white/10" />
+                <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  Already deployed
+                </p>
                 <button
                   onClick={() => {
-                    openCloudflareModal();
+                    openCreateModal(RELAY_PROXY_POOL_TYPES[0]?.value);
                     setShowRelayMenu(false);
                   }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-[20px] text-orange-500">cloud</span>
-                  Cloudflare Relay
+                  <span className="material-symbols-outlined text-[20px] text-text-muted">link</span>
+                  Import relay URL
                 </button>
                 <button
                   onClick={() => {
-                    openVercelModal();
+                    openBatchImportModal(RELAY_PROXY_POOL_TYPES[0]?.value);
                     setShowRelayMenu(false);
                   }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-[20px] text-blue-500">cloud_upload</span>
-                  Vercel Relay
-                </button>
-                <button
-                  onClick={() => {
-                    openDenoModal();
-                    setShowRelayMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  <span className="material-symbols-outlined text-[20px] text-green-500">terminal</span>
-                  Deno Relay
+                  <span className="material-symbols-outlined text-[20px] text-text-muted">playlist_add</span>
+                  Import relay URLs in bulk
                 </button>
               </div>
             )}
           </div>
 
-          <Button size="sm" variant="secondary" icon="upload" onClick={openBatchImportModal}>
+          <Button size="sm" variant="secondary" icon="upload" onClick={() => openBatchImportModal()}>
             Batch Import
           </Button>
-          <Button size="sm" icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
+          <Button size="sm" icon="add" onClick={() => openCreateModal()}>Add Proxy Pool</Button>
         </div>
       </div>
 
@@ -694,7 +789,7 @@ export default function ProxyPoolsPage() {
             <p className="text-sm text-text-muted mb-4">
               Create a proxy pool entry, then assign it to connections.
             </p>
-            <Button icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
+            <Button icon="add" onClick={() => openCreateModal()}>Add Proxy Pool</Button>
           </div>
         ) : (
           <div className="flex flex-col divide-y divide-black/[0.04] dark:divide-white/[0.05]">
@@ -716,11 +811,8 @@ export default function ProxyPoolsPage() {
                     <Badge variant={pool.isActive ? "success" : "default"} size="sm">
                       {pool.isActive ? "active" : "inactive"}
                     </Badge>
-                    {pool.type === "vercel" && (
-                      <Badge variant="default" size="sm">vercel relay</Badge>
-                    )}
-                    {pool.type === "cloudflare" && (
-                      <Badge variant="default" size="sm">cloudflare relay</Badge>
+                    {getProxyPoolType(pool.type).badge && (
+                      <Badge variant="default" size="sm">{getProxyPoolType(pool.type).badge}</Badge>
                     )}
                     <Badge variant="default" size="sm">
                       {pool.boundConnectionCount || 0} bound
@@ -780,20 +872,32 @@ export default function ProxyPoolsPage() {
 
       <Modal
         isOpen={showBatchImportModal}
-        title="Batch Import Proxies"
+        title={batchImportIsRelay ? "Batch Import Relays" : "Batch Import Proxies"}
         onClose={closeBatchImportModal}
       >
         <div className="flex flex-col gap-4">
+          <Select
+            label="Type"
+            value={batchImportType}
+            onChange={(e) => setBatchImportType(e.target.value)}
+            options={TYPE_OPTIONS}
+            disabled={importing}
+            hint={batchImportIsRelay
+              ? "Used for lines whose platform cannot be read from the hostname."
+              : "HTTP proxies are dispatched through a proxy agent; relays forward via relay headers."}
+          />
           <div>
-            <label className="text-sm font-medium text-text-main mb-1 block">Paste Proxy List (One per line)</label>
+            <label className="text-sm font-medium text-text-main mb-1 block">
+              {batchImportIsRelay ? "Paste Relay URLs (One per line)" : "Paste Proxy List (One per line)"}
+            </label>
             <textarea
               value={batchImportText}
               onChange={(e) => setBatchImportText(e.target.value)}
-              placeholder={"http://user:pass@127.0.0.1:7897\n127.0.0.1:7897:user:pass"}
+              placeholder={batchImportDescriptor.importPlaceholder}
               className="w-full min-h-[180px] py-2 px-3 text-sm text-text-main bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-md focus:ring-1 focus:ring-primary/30 focus:border-primary/50 focus:outline-none transition-all"
             />
             <p className="text-xs text-text-muted mt-1">
-              Supported formats: protocol://user:pass@host:port, host:port:user:pass
+              {batchImportDescriptor.importHint}
             </p>
           </div>
 
@@ -986,28 +1090,42 @@ export default function ProxyPoolsPage() {
 
       <Modal
         isOpen={showFormModal}
-        title={editingProxyPool ? "Edit Proxy Pool" : "Add Proxy Pool"}
+        title={editingProxyPool
+          ? `Edit ${formIsRelay ? "Relay" : "Proxy Pool"}`
+          : `Add ${formIsRelay ? formDescriptor.label : "Proxy Pool"}`}
         onClose={closeFormModal}
       >
         <div className="flex flex-col gap-4">
+          <Select
+            label="Type"
+            value={formData.type}
+            onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
+            options={TYPE_OPTIONS}
+            disabled={saving}
+            hint={formIsRelay
+              ? "Registers a relay you already deployed — no token needed, 9router only needs its URL."
+              : "Routed through an HTTP/HTTPS/SOCKS proxy agent."}
+          />
           <Input
             label="Name"
             value={formData.name}
             onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-            placeholder="Office Proxy"
+            placeholder={formIsRelay ? "my-relay" : "Office Proxy"}
           />
           <Input
-            label="Proxy URL"
+            label={formDescriptor.urlLabel}
             value={formData.proxyUrl}
-            onChange={(e) => setFormData((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-            placeholder="http://127.0.0.1:7897"
+            onChange={(e) => handleProxyUrlChange(e.target.value)}
+            placeholder={formDescriptor.urlPlaceholder}
+            hint={formDescriptor.urlHint || undefined}
+            error={proxyUrlError}
           />
           <Input
             label="No Proxy"
             value={formData.noProxy}
             onChange={(e) => setFormData((prev) => ({ ...prev, noProxy: e.target.value }))}
             placeholder="localhost,127.0.0.1,.internal"
-            hint="Comma-separated hosts/domains to bypass proxy"
+            hint={formDescriptor.noProxyHint}
           />
 
           <div className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1024,8 +1142,8 @@ export default function ProxyPoolsPage() {
 
           <div className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium text-sm">Strict Proxy</p>
-              <p className="text-xs text-text-muted">Fail request if proxy is unreachable instead of falling back to direct.</p>
+              <p className="font-medium text-sm">{formIsRelay ? "Strict Relay" : "Strict Proxy"}</p>
+              <p className="text-xs text-text-muted">{formDescriptor.strictHint}</p>
             </div>
             <Toggle
               checked={formData.strictProxy === true}
@@ -1038,7 +1156,7 @@ export default function ProxyPoolsPage() {
             <Button
               fullWidth
               onClick={handleSave}
-              disabled={!formData.name.trim() || !formData.proxyUrl.trim() || saving}
+              disabled={!formData.name.trim() || !formData.proxyUrl.trim() || !!proxyUrlError || saving}
             >
               {saving ? "Saving..." : "Save"}
             </Button>
