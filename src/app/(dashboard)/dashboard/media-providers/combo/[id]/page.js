@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Card, Button, Input, Toggle, ModelSelectModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { AI_PROVIDERS, MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
+import { VideoResultPreview } from "@/app/(dashboard)/dashboard/media-providers/[kind]/[id]/components/VideoResultPreview";
 
 // Parse "providerId/model" or just "providerId" → { providerId, model }
 function parseModelEntry(entry) {
@@ -230,13 +231,22 @@ export default function ComboDetailPage() {
         setTestResult({ audioUrl: URL.createObjectURL(blob), latencyMs, servedBy });
         return;
       }
-      // JSON — could be image (data[0].b64_json/url) or generic
+      // JSON — could be image (data[0].b64_json/url), a video job, or generic
       const data = await res.json();
       const first = data?.data?.[0];
       const imageUrl = first?.b64_json
         ? `data:image/png;base64,${first.b64_json}`
         : (first?.url || "");
-      setTestResult({ json: JSON.stringify(maskB64(data), null, 2), imageUrl, latencyMs, servedBy: servedBy || data?.model || "" });
+      // A video job is bound to the provider + account that created it, and a poll
+      // has to echo both back — the combo member that served this may not be the
+      // first one, so the headers are the only place the answer appears.
+      const video = combo.kind !== "video" ? null : {
+        runId: `${start}`,
+        payload: data,
+        provider: res.headers.get("x-9router-provider") || "",
+        connectionId: res.headers.get("x-9router-connection-id") || "",
+      };
+      setTestResult({ json: JSON.stringify(maskB64(data), null, 2), imageUrl, video, latencyMs, servedBy: servedBy || data?.model || "" });
     } catch (e) {
       setTestError(e.message || "Network error");
     } finally {
@@ -417,6 +427,18 @@ export default function ComboDetailPage() {
                   </div>
                   <audio controls src={testResult.audioUrl} className="w-full" />
                 </div>
+              )}
+              {testResult.video && (
+                <VideoResultPreview
+                  key={testResult.video.runId}
+                  payload={testResult.video.payload}
+                  provider={testResult.video.provider}
+                  connectionId={testResult.video.connectionId}
+                  apiKey={apiKey}
+                  onResolved={(data) =>
+                    setTestResult((r) => (r ? { ...r, json: JSON.stringify(maskB64(data), null, 2) } : r))
+                  }
+                />
               )}
               {testResult.json && (
                 <pre className="text-xs font-mono bg-black/[0.03] dark:bg-white/[0.03] p-3 rounded-lg overflow-auto max-h-[300px] whitespace-pre-wrap break-all">

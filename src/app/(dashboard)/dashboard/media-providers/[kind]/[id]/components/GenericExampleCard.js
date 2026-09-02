@@ -6,6 +6,7 @@ import { MEDIA_PROVIDER_KINDS, getProviderAlias, resolveProviderId } from "@/sha
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { Row, KIND_EXAMPLE_CONFIG } from "./exampleShared";
+import { VideoResultPreview } from "./VideoResultPreview";
 
 const CLOUDFLARE_TEST_IMAGE_URL = "https://pub-1fb693cb11cc46b2b2f656f51e015a2c.r2.dev/dog.png";
 const CLOUDFLARE_TEST_MASK_URL = "https://pub-1fb693cb11cc46b2b2f656f51e015a2c.r2.dev/dog-mask.png";
@@ -58,6 +59,9 @@ export function GenericExampleCard({ providerId, kind }) {
   const [localEndpoint, setLocalEndpoint] = useState("");
   const [tunnelEndpoint, setTunnelEndpoint] = useState("");
   const [result, setResult] = useState(null);
+  // Video jobs are bound to the provider + account that created them; the create
+  // response names both, and a poll has to echo them back (see VideoResultPreview).
+  const [videoJob, setVideoJob] = useState(null); // { provider, connectionId }
   const [progress, setProgress] = useState(null); // { stage, bytesReceived }
   const [partialImage, setPartialImage] = useState(null);
   const [imageOutputFormat, setImageOutputFormat] = useState("json"); // json | binary
@@ -136,6 +140,7 @@ export function GenericExampleCard({ providerId, kind }) {
     setResult(null);
     setProgress(null);
     setPartialImage(null);
+    setVideoJob(null);
     if (binaryImageUrl) { try { URL.revokeObjectURL(binaryImageUrl); } catch {} setBinaryImageUrl(""); }
     const start = Date.now();
     try {
@@ -200,6 +205,15 @@ export function GenericExampleCard({ providerId, kind }) {
       } else {
         const data = await res.json();
         const latencyMs = Date.now() - start;
+        if (kind === "video") {
+          setVideoJob({
+            // Remounts the preview per run (its `key`), so a second generation
+            // never shows the previous job's video while the new one renders.
+            runId: `${start}`,
+            provider: res.headers.get("x-9router-provider") || "",
+            connectionId: res.headers.get("x-9router-connection-id") || "",
+          });
+        }
         setResult({ data, latencyMs });
       }
     } catch (e) {
@@ -539,6 +553,18 @@ export function GenericExampleCard({ providerId, kind }) {
               decoding="async"
               />
             </div>
+          )}
+          {/* Video player — the create usually already carries the finished URL;
+              when it comes back still rendering this polls the job out. */}
+          {kind === "video" && result?.data && (
+            <VideoResultPreview
+              key={videoJob?.runId || "video"}
+              payload={result.data}
+              provider={videoJob?.provider}
+              connectionId={videoJob?.connectionId}
+              apiKey={apiKey}
+              onResolved={(data) => setResult((r) => (r ? { ...r, data } : r))}
+            />
           )}
         </div>
       </div>

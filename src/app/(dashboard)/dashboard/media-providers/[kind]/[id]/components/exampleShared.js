@@ -492,3 +492,60 @@ export const KIND_EXAMPLE_CONFIG = {
     defaultResponse: `{\n  "data": [\n    { "url": "...", "format": "mp3" }\n  ]\n}`,
   },
 };
+
+// -- video results -----------------------------------------------------------
+//
+// /v1/videos answers `{ status, video: { url } }` for every provider (the
+// adapters in open-sse/handlers/videoProviders/* normalize into it), but a job
+// that is still rendering carries only `{ request_id, status }` — so the panel
+// has to recognize both, plus the looser shapes an un-adapted upstream may
+// return, before it can show a player.
+
+/** Statuses that mean "come back later" rather than a finished or failed job. */
+export const VIDEO_PENDING_STATUSES = new Set(["pending", "processing", "queued", "in_queue", "in_progress", "running", "starting"]);
+
+/** Statuses that mean the job will never produce a video. */
+export const VIDEO_FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled", "expired"]);
+
+/**
+ * The playable URL in a /v1/videos payload, whatever the provider called it.
+ *
+ * `video.url` is the published contract and is checked first; the rest cover
+ * providers proxied verbatim (no adapter), which spell the same thing as a bare
+ * string, a `data[]` entry, or a flat `video_url`.
+ */
+export function extractVideoUrl(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const candidates = [
+    payload.video?.url,
+    typeof payload.video === "string" ? payload.video : null,
+    payload.video_url,
+    payload.url,
+    payload.output?.video_url,
+    payload.data?.[0]?.url,
+    payload.data?.[0]?.video_url,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+/** True while a video job has neither a URL nor a terminal failure. */
+export function isVideoPending(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (extractVideoUrl(payload)) return false;
+  const status = String(payload.status || "").toLowerCase();
+  if (VIDEO_FAILED_STATUSES.has(status)) return false;
+  // An id with no URL is a job in flight even when the status word is missing or
+  // says "done" — the create envelope reports done before the URL exists.
+  return !!(payload.request_id || payload.id);
+}
+
+/** The error message a failed video job explains itself with. */
+export function videoErrorMessage(payload) {
+  const error = payload?.error;
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  return error.message || error.code || "";
+}
