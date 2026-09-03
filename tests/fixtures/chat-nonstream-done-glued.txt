@@ -1,0 +1,2 @@
+{"id":"faf96ba1ca6b4cbe8004133a8248ed1a","created":1788456316,"model":"mistral-small-latest","usage":{"prompt_tokens":27,"total_tokens":49,"completion_tokens":22,"prompt_tokens_details":{"cached_tokens":0},"service_tier":"standard"},"object":"chat.completion","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","tool_calls":null,"content":"9Router is a networking device, typically a router, designed to provide internet connectivity and manage network traffic."}}]}data: [DONE]
+

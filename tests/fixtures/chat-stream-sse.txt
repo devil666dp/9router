@@ -1,0 +1,24 @@
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":"9"},"finish_reason":null}],"p":"abcdefghijklmnopqr"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":"Router is a networking"},"finish_reason":null}],"p":"abcdefghijklmnopqrstuvwxyz01234567"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" device,"},"finish_reason":null}],"p":"abcdefghijklmnopqrstuvwxyz012345"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" typically"},"finish_reason":null}],"p":"abcdefghijklmnopqrstuvwx"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" a router,"},"finish_reason":null}],"p":"abcdefghijklmnopqrstuvwxyz0123456"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" that provides internet"},"finish_reason":null}],"p":"abcdefghijklm"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" connectivity"},"finish_reason":null}],"p":"abcdefg"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" and manages"},"finish_reason":null}],"p":"abcd"}
+
+data: {"id":"3fd80c26df33468e817ee6c60e1391da","object":"chat.completion.chunk","created":1788456407,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" network traffic."},"finish_reason":"stop"}],"usage":{"prompt_tokens":2027,"completion_tokens":21,"total_tokens":2048,"prompt_tokens_details":{"cached_tokens":0}},"p":"abcdefghijklmnopqrs"}
+
+data: [DONE]
+
+data: [DONE]
+

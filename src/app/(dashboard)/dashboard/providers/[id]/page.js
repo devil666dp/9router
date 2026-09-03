@@ -23,6 +23,7 @@ import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
+import PlaygroundCard from "./PlaygroundCard";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
 
@@ -1243,6 +1244,29 @@ export default function ProviderDetailPage() {
     );
   };
 
+  // Model options for the Playground — same set the Models card shows (customs +
+  // built-ins + Kilo free, minus disabled), flattened to { id, name }.
+  const playgroundModels = (() => {
+    const customRows = getProviderCustomModelRows({
+      customModels,
+      modelAliases,
+      providerAlias: providerStorageAlias,
+      builtInModels: isCompatible ? [] : models,
+      type: "llm",
+    }).map((row) => ({ id: row.id, name: row.name || row.id }));
+    if (isCompatible) return customRows;
+    const disabledSet = new Set(disabledModelIds);
+    const builtIns = [
+      ...models,
+      ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
+    ]
+      .filter((m) => { const k = getModelKind(m); return !k || k === "llm"; })
+      .filter((m) => !disabledSet.has(m.id))
+      .map((m) => ({ id: m.id, name: m.name || m.id }));
+    const seen = new Set();
+    return [...customRows, ...builtIns].filter((m) => !seen.has(m.id) && seen.add(m.id));
+  })();
+
   if (loading) {
     return (
       <div className="flex flex-col gap-8">
@@ -1701,6 +1725,16 @@ export default function ProviderDetailPage() {
         )}
         {renderModelsSection()}
       </Card>
+
+      {/* Playground — run a custom prompt against this provider */}
+      <PlaygroundCard
+        providerId={providerId}
+        providerAlias={providerStorageAlias}
+        providerDisplayAlias={providerDisplayAlias}
+        models={playgroundModels}
+        connections={connections.filter((c) => c.isActive !== false)}
+        isFreeNoAuth={isFreeNoAuth}
+      />
 
       {bulkActionModal}
 

@@ -88,6 +88,15 @@
 - **Proxy pools**: the type list moved to `src/shared/constants/proxyTypes.js`,
   shared by the dashboard, the proxy-pools API and runtime proxy resolution, so
   adding a relay platform is one entry there rather than four hardcoded lists
+- **Dashboard**: every provider detail page gains a **Playground** card — pick a
+  model (with its thinking level), optionally pin one account, write a system
+  prompt and your own prompt, and run it against `/v1/chat/completions` from the
+  page. Built on the same labelled-row → curl preview → response layout the media
+  providers' Example cards use, and shows streamed output live with latency,
+  first-token time, token usage, finish reason, reasoning and the raw JSON
+- **Chat**: `POST /v1/chat/completions` now honours the `x-connection-id` header
+  to pin a request to one account, matching the image and video handlers. Account
+  fallback still applies if the pinned account fails
 
 ## Fixes
 - **Proxy pools**: `PUT /api/proxy-pools/[id]` validated `type` against a list

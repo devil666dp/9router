@@ -1,13 +1,9 @@
 "use client";
 
-export function Row({ label, children }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-      <span className="w-full text-xs font-medium text-text-muted sm:w-20 sm:shrink-0">{label}</span>
-      <div className="w-full min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
+import FieldRow from "@/shared/components/FieldRow";
+
+// Kept as a named re-export: every example card already imports `Row` from here.
+export const Row = FieldRow;
 
 export const KIND_EXAMPLE_CONFIG = {
   webSearch: {
