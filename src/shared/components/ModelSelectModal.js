@@ -6,6 +6,7 @@ import Modal from "./Modal";
 import ProviderIcon from "./ProviderIcon";
 import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { safeLogoUrl } from "@/shared/utils/logoUrl";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
 
@@ -271,6 +272,7 @@ export default function ModelSelectModal({
             alias: alias,
             color: providerInfo.color,
             models: combined,
+            logoUrl: matchedNode?.logoUrl,
           };
         }
       } else if (isCustomProvider) {
@@ -321,6 +323,7 @@ export default function ModelSelectModal({
           models: modelsToShow,
           isCustom: true,
           hasModels: mergedModels.length > 0,
+          logoUrl: matchedNode?.logoUrl,
         };
       } else {
         const hardcodedModels = providerId === "cursor" && cursorModels.length > 0
@@ -535,7 +538,7 @@ export default function ModelSelectModal({
             {/* Provider header */}
             <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
               <ProviderIcon
-                src={`/providers/${providerId}.png`}
+                src={safeLogoUrl(group.logoUrl) || `/providers/${providerId}.png`}
                 alt={group.name}
                 size={14}
                 fallbackText={(group.name || providerId).slice(0, 2).toUpperCase()}

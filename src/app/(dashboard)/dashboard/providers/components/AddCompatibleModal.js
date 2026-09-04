@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Badge, Button, Input, Modal, Select } from "@/shared/components";
+import { Badge, Button, Input, LogoUrlInput, Modal, Select } from "@/shared/components";
 
 const VARIANT_CONFIG = {
   openai: {
@@ -15,6 +15,8 @@ const VARIANT_CONFIG = {
     modelIdPlaceholder: "e.g. gpt-4, claude-3-opus",
     errorLabel: "OpenAI Compatible",
     hasApiType: true,
+    textIcon: "OC",
+    color: "#10A37F",
   },
   anthropic: {
     title: "Add Anthropic Compatible",
@@ -26,6 +28,8 @@ const VARIANT_CONFIG = {
     modelIdPlaceholder: "e.g. claude-3-opus",
     errorLabel: "Anthropic Compatible",
     hasApiType: false,
+    textIcon: "AC",
+    color: "#D97757",
   },
 };
 
@@ -41,6 +45,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
     prefix: "",
     ...(config.hasApiType ? { apiType: "chat" } : {}),
     baseUrl: config.defaultBaseUrl,
+    logoUrl: "",
   });
 
   const [formData, setFormData] = useState(initialFormData);
@@ -73,6 +78,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           prefix: formData.prefix,
           ...(config.hasApiType ? { apiType: formData.apiType } : {}),
           baseUrl: formData.baseUrl,
+          logoUrl: formData.logoUrl,
           type: config.type,
         }),
       });
@@ -164,6 +170,12 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
           placeholder={config.defaultBaseUrl}
           hint={config.baseUrlHint}
+        />
+        <LogoUrlInput
+          value={formData.logoUrl}
+          onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
+          fallbackText={config.textIcon}
+          fallbackColor={config.color}
         />
         <Input
           label="API Key (for Check)"

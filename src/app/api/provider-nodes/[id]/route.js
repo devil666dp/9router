@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { validateSpec, specUrls } from "open-sse/handlers/customEndpoint/index.js";
+import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
+import { parseLogoUrl } from "@/shared/utils/logoUrl.js";
+import { isLocalRequest } from "@/dashboardGuard";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl } = body;
+    const { name, prefix, apiType, baseUrl, spec, logoUrl } = body;
     const node = await getProviderNodeById(id);
 
     if (!node) {
@@ -19,6 +23,54 @@ export async function PUT(request, { params }) {
 
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
+    }
+
+    // Omitted means "leave the logo alone"; an empty string clears it.
+    let logo;
+    try {
+      logo = logoUrl === undefined ? node.logoUrl : (parseLogoUrl(logoUrl) || undefined);
+    } catch (logoError) {
+      return NextResponse.json({ error: logoError.message }, { status: 400 });
+    }
+
+    // Custom-endpoint nodes carry a recipe instead of a base URL, so they take
+    // their own path out of here before the baseUrl/apiType guards below.
+    if (node.type === "custom-endpoint") {
+      const nextSpec = spec === undefined ? node.spec : spec;
+      const errors = validateSpec(nextSpec);
+      if (errors.length) {
+        return NextResponse.json({ error: `Invalid recipe: ${errors.join("; ")}` }, { status: 400 });
+      }
+      if (spec !== undefined && !isLocalRequest(request)) {
+        for (const specUrl of specUrls(nextSpec)) {
+          try {
+            assertPublicUrl(specUrl.replace(/\{[^}]*\}/g, "x"));
+          } catch (urlError) {
+            return NextResponse.json({ error: `Recipe URL rejected: ${urlError.message}` }, { status: 400 });
+          }
+        }
+      }
+
+      const updatedNode = await updateProviderNode(id, {
+        name: name.trim(),
+        prefix: prefix.trim(),
+        logoUrl: logo,
+        spec: nextSpec,
+      });
+
+      const nodeConnections = await getProviderConnections({ provider: id });
+      await Promise.all(nodeConnections.map((connection) => (
+        updateProviderConnection(connection.id, {
+          providerSpecificData: {
+            ...(connection.providerSpecificData || {}),
+            prefix: prefix.trim(),
+            nodeName: updatedNode.name,
+            spec: nextSpec,
+          }
+        })
+      )));
+
+      return NextResponse.json({ node: updatedNode });
     }
 
     // Only validate apiType for OpenAI Compatible nodes
@@ -52,6 +104,7 @@ export async function PUT(request, { params }) {
       name: name.trim(),
       prefix: prefix.trim(),
       baseUrl: sanitizedBaseUrl,
+      logoUrl: logo,
     };
 
     if (node.type === "openai-compatible") {

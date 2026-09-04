@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
+import { safeLogoUrl } from "@/shared/utils/logoUrl";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEndpointProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -20,6 +21,7 @@ import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
+import EditCustomEndpointNodeModal from "./EditCustomEndpointNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
@@ -131,15 +133,20 @@ export default function ProviderDetailPage() {
     triggerApiKeyConnection();
   };
 
+  const nodeTypeDisplay = {
+    "anthropic-compatible": { fallbackName: "Anthropic Compatible", color: "#D97757", textIcon: "AC" },
+    "custom-endpoint": { fallbackName: "Custom Endpoint", color: "#7C6BF2", textIcon: "CE" },
+  };
   const providerInfo = providerNode
     ? {
         id: providerNode.id,
-        name: providerNode.name || (providerNode.type === "anthropic-compatible" ? "Anthropic Compatible" : "OpenAI Compatible"),
-        color: providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
-        textIcon: providerNode.type === "anthropic-compatible" ? "AC" : "OC",
+        name: providerNode.name || nodeTypeDisplay[providerNode.type]?.fallbackName || "OpenAI Compatible",
+        color: nodeTypeDisplay[providerNode.type]?.color || "#10A37F",
+        textIcon: nodeTypeDisplay[providerNode.type]?.textIcon || "OC",
         apiType: providerNode.apiType,
         baseUrl: providerNode.baseUrl,
         type: providerNode.type,
+        logoUrl: providerNode.logoUrl,
       }
     : (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId] || WEB_COOKIE_PROVIDERS[providerId]);
   const authModes = providerInfo?.authModes || [];
@@ -154,7 +161,12 @@ export default function ProviderDetailPage() {
   
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
-  const isCompatible = isOpenAICompatible || isAnthropicCompatible;
+  const isCustomEndpoint = isCustomEndpointProvider(providerId);
+  // "Compatible" here means "a user-defined provider node", which is what the
+  // shared UI paths below key off (models come from customModels, connections
+  // are API keys, the header/details card is node-driven). Custom-endpoint nodes
+  // are exactly that, so they join the same paths rather than duplicating them.
+  const isCompatible = isOpenAICompatible || isAnthropicCompatible || isCustomEndpoint;
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
@@ -1089,6 +1101,7 @@ export default function ProviderDetailPage() {
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
+          isRecipe={isCustomEndpoint}
         />
       );
     }
@@ -1287,14 +1300,38 @@ export default function ProviderDetailPage() {
     );
   }
 
-  // Determine icon path: OpenAI Compatible providers use specialized icons
+  // What this endpoint actually calls, read straight off the stored spec so the
+  // card can never disagree with the runtime. `create` is the legacy nesting.
+  const recipeSpec = isCustomEndpoint ? (providerNode?.spec || {}) : {};
+  const recipeUrl = recipeSpec.url || recipeSpec.create?.url || "";
+  const recipeMethod = (recipeSpec.method || recipeSpec.create?.method || "POST").toUpperCase();
+  const recipePollUrl = recipeSpec.poll?.url || "";
+  const recipePollLabel = recipeSpec.poll?.mode === "stream"
+    ? `then stream ${(recipeSpec.poll?.method || "GET").toUpperCase()}`
+    : `then poll ${(recipeSpec.poll?.method || "GET").toUpperCase()}`;
+  const recipeAuthLabel = (() => {
+    const auth = recipeSpec.auth;
+    if (auth === "none" || auth?.scheme === "none") return "No auth";
+    const header = auth?.header || "Authorization";
+    return auth?.scheme === "raw" ? `Key in ${header}` : "Bearer token";
+  })();
+  // Variables the user has to supply, shown so they can be changed without
+  // opening the editor's mind — the values live on the node, not per request.
+  const recipeVars = Object.entries(recipeSpec.vars || {});
+
+  // Determine icon path: a node's own logo wins, then the specialized
+  // OpenAI/Anthropic marks, then the registry icon.
+  const nodeLogo = safeLogoUrl(providerInfo.logoUrl);
   const getHeaderIconPath = () => {
+    if (nodeLogo) return nodeLogo;
     if (isOpenAICompatible && providerInfo.apiType) {
       return providerInfo.apiType === "responses" ? "/providers/oai-r.png" : "/providers/oai-cc.png";
     }
     if (isAnthropicCompatible) {
       return "/providers/anthropic-m.png";
     }
+    // A recipe upstream with no logo has no brand we can guess — use the badge.
+    if (isCustomEndpoint) return null;
     return getProviderIconSrc(providerInfo.id);
   };
 
@@ -1326,8 +1363,13 @@ export default function ProviderDetailPage() {
                 height={48}
                 className="max-h-12 max-w-12 rounded-lg object-contain"
                 sizes="48px"
+                // A user-supplied logo lives on an arbitrary host, which the
+                // optimizer would refuse without a remotePatterns entry.
+                unoptimized
                 onError={() => {
-                  markProviderIconMissing(providerInfo.id);
+                  // Only poison the icon cache for a registry icon; a bad logo
+                  // URL says nothing about this provider's bundled png.
+                  if (!nodeLogo) markProviderIconMissing(providerInfo.id);
                   setHeaderImgError(true);
                 }}
               loading="lazy"
@@ -1385,11 +1427,37 @@ export default function ProviderDetailPage() {
         <Card>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <h2 className="text-lg font-semibold">{isAnthropicCompatible ? "Anthropic Compatible Details" : "OpenAI Compatible Details"}</h2>
-              <p className="break-all text-sm text-text-muted">
-                {isAnthropicCompatible ? "Messages API" : (providerNode.apiType === "responses" ? "Responses API" : "Chat Completions")} · {(providerNode.baseUrl || "").replace(/\/$/, "")}/
-                {isAnthropicCompatible ? "messages" : (providerNode.apiType === "responses" ? "responses" : "chat/completions")}
-              </p>
+              <h2 className="text-lg font-semibold">
+                {isCustomEndpoint ? "Custom Endpoint Details" : isAnthropicCompatible ? "Anthropic Compatible Details" : "OpenAI Compatible Details"}
+              </h2>
+              {isCustomEndpoint ? (
+                <div className="flex flex-col gap-0.5 text-sm text-text-muted">
+                  <p className="break-all">
+                    <span className="font-mono text-xs font-semibold text-text-main">{recipeMethod}</span>{" "}
+                    {recipeUrl || "no URL set"}
+                  </p>
+                  {!!recipePollUrl && (
+                    <p className="break-all">
+                      <span className="font-mono text-xs font-semibold text-text-main">{recipePollLabel}</span>{" "}
+                      {recipePollUrl}
+                    </p>
+                  )}
+                  <p className="break-all">
+                    {recipeAuthLabel} · Called as <code>{providerDisplayAlias}/model</code>
+                  </p>
+                  {recipeVars.length > 0 && (
+                    <p className="break-all">
+                      Variables ·{" "}
+                      {recipeVars.map(([key, value]) => `{${key}} = ${value}`).join(", ")}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="break-all text-sm text-text-muted">
+                  {isAnthropicCompatible ? "Messages API" : (providerNode.apiType === "responses" ? "Responses API" : "Chat Completions")} · {(providerNode.baseUrl || "").replace(/\/$/, "")}/
+                  {isAnthropicCompatible ? "messages" : (providerNode.apiType === "responses" ? "responses" : "chat/completions")}
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
               <Button
@@ -1418,8 +1486,10 @@ export default function ProviderDetailPage() {
                 icon="delete"
                 onClick={async () => {
                   setConfirmState({
-                    title: "Delete Compatible Node",
-                    message: `Delete this ${isAnthropicCompatible ? "Anthropic" : "OpenAI"} Compatible node?`,
+                    title: isCustomEndpoint ? "Delete Custom Endpoint Node" : "Delete Compatible Node",
+                    message: isCustomEndpoint
+                      ? "Delete this Custom Endpoint node? Its recipe and every connection under it are removed."
+                      : `Delete this ${isAnthropicCompatible ? "Anthropic" : "OpenAI"} Compatible node?`,
                     onConfirm: async () => {
                       setConfirmState(null);
                       try {
@@ -1781,6 +1851,7 @@ export default function ProviderDetailPage() {
         providerName={providerInfo.name}
         isCompatible={isCompatible}
         isAnthropic={isAnthropicCompatible}
+        isCustomEndpoint={isCustomEndpoint}
         authType={providerInfo?.authType}
         authHint={providerInfo?.authHint}
         website={providerInfo?.website}
@@ -1801,13 +1872,21 @@ export default function ProviderDetailPage() {
         onSave={handleUpdateConnection}
         onClose={() => setShowEditModal(false)}
       />
-      {isCompatible && (
+      {isCompatible && !isCustomEndpoint && (
         <EditCompatibleNodeModal
           isOpen={showEditNodeModal}
           node={providerNode}
           onSave={handleUpdateNode}
           onClose={() => setShowEditNodeModal(false)}
           isAnthropic={isAnthropicCompatible}
+        />
+      )}
+      {isCustomEndpoint && (
+        <EditCustomEndpointNodeModal
+          isOpen={showEditNodeModal}
+          node={providerNode}
+          onSave={handleUpdateNode}
+          onClose={() => setShowEditNodeModal(false)}
         />
       )}
       {!isCompatible && (

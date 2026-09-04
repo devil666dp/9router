@@ -22,7 +22,10 @@ export default function ProviderIcon({
   fallbackColor,
 }) {
   const effectiveSrc = resolveSrc(src, providerId);
-  const [errored, setErrored] = useState(false);
+  // Remember WHICH src failed, not just that one did: a node's logo URL can be
+  // corrected in place, and a boolean would keep showing the badge afterwards.
+  const [erroredSrc, setErroredSrc] = useState(null);
+  const errored = !!effectiveSrc && erroredSrc === effectiveSrc;
 
   if (!effectiveSrc || errored) {
     return (
@@ -53,7 +56,7 @@ export default function ProviderIcon({
         const m = effectiveSrc.match(/^\/providers\/([^/]+)\.png$/i);
         if (m) markProviderIconMissing(m[1]);
         if (providerId) markProviderIconMissing(providerId);
-        setErrored(true);
+        setErroredSrc(effectiveSrc);
       }}
     />
   );

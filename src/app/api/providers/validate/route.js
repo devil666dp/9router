@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderNodeById } from "@/models";
-import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider, isCustomEndpointProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { runRecipe, buildCanonicalInput, RecipeError } from "open-sse/handlers/customEndpoint/index.js";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
@@ -89,7 +90,10 @@ export async function POST(request) {
     const { apiKey, providerSpecificData } = body;
 
     const isNoAuth = AI_PROVIDERS[provider]?.noAuth === true;
-    if (!provider || (!apiKey && provider !== "ollama-local" && !isNoAuth)) {
+    // A custom-endpoint recipe decides for itself whether a token is sent
+    // (auth: "none" for public Gradio spaces and self-hosted servers), so a
+    // keyless check is legitimate there.
+    if (!provider || (!apiKey && provider !== "ollama-local" && !isNoAuth && !isCustomEndpointProvider(provider))) {
       return NextResponse.json({ error: "Provider and API key required" }, { status: 400 });
     }
 
@@ -112,6 +116,30 @@ export async function POST(request) {
           valid: isValid,
           error: isValid ? null : "Invalid API key",
         });
+      }
+
+      // Custom Endpoint nodes: the only honest probe is to run the recipe once.
+      // There is no /models or /chat/completions to ask — the recipe *is* the API.
+      if (isCustomEndpointProvider(provider)) {
+        const node = await getProviderNodeById(provider);
+        if (!node) {
+          return NextResponse.json({ error: "Custom Endpoint node not found" }, { status: 404 });
+        }
+        const probeModel = body.modelId?.trim() || providerSpecificData?.defaultModel?.trim() || "test";
+        try {
+          const { text } = await runRecipe({
+            rawSpec: node.spec,
+            input: buildCanonicalInput({ messages: [{ role: "user", content: "ping" }] }, probeModel),
+            model: probeModel,
+            credentials: { apiKey },
+          });
+          return NextResponse.json({ valid: true, method: "recipe", preview: String(text).slice(0, 200) });
+        } catch (recipeError) {
+          const message = recipeError instanceof RecipeError && (recipeError.status === 401 || recipeError.status === 403)
+            ? "Invalid API key"
+            : recipeError.message;
+          return NextResponse.json({ valid: false, error: message, method: "recipe" });
+        }
       }
 
       // Custom Embedding nodes: probe /models (most embedding APIs are OpenAI-compatible)

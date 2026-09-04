@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
+import { validateSpec, specUrls, runRecipe, buildCanonicalInput, RecipeError } from "open-sse/handlers/customEndpoint/index.js";
 
 // Fetch with timeout wrapper
 const fetchWithTimeout = (url, options, timeout = 10000) => {
@@ -55,7 +56,54 @@ const getChatErrorMessage = (status) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { baseUrl, apiKey, type, modelId } = body;
+    const { baseUrl, apiKey, type, modelId, spec } = body;
+
+    // Custom Endpoint Validation — dry-run the recipe itself.
+    //
+    // Handled before the baseUrl/apiKey checks below because a recipe has
+    // neither: its URLs live inside the recipe, and `auth: "none"` recipes
+    // legitimately carry no key. Probing /models or /chat/completions would be
+    // meaningless here, so the only honest test is to actually run the thing.
+    if (type === "custom-endpoint") {
+      const specErrors = validateSpec(spec);
+      if (specErrors.length) {
+        return NextResponse.json({ valid: false, error: `Invalid recipe: ${specErrors.join("; ")}` });
+      }
+
+      if (!isLocalRequest(request)) {
+        for (const url of specUrls(spec)) {
+          try {
+            assertPublicUrl(url.replace(/\{[^}]*\}/g, "x"));
+          } catch {
+            return NextResponse.json({ valid: false, error: `Recipe URL not allowed: ${url}` });
+          }
+        }
+      }
+
+      const probeModel = modelId?.trim() || "test";
+      try {
+        const { text, usage } = await runRecipe({
+          rawSpec: spec,
+          input: buildCanonicalInput({ messages: [{ role: "user", content: "ping" }] }, probeModel),
+          model: probeModel,
+          credentials: { apiKey },
+        });
+        return NextResponse.json({
+          valid: true,
+          method: "recipe",
+          preview: String(text).slice(0, 200),
+          ...(usage ? { usage } : {}),
+        });
+      } catch (error) {
+        if (error instanceof RecipeError) {
+          const hint = error.status === 401 || error.status === 403
+            ? "API key unauthorized"
+            : error.message;
+          return NextResponse.json({ valid: false, error: hint, method: "recipe" });
+        }
+        return NextResponse.json({ valid: false, error: getErrorMessage(error), method: "recipe" });
+      }
+    }
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json({ error: "Base URL and API key required" }, { status: 400 });

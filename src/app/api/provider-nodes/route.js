@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
-import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
+import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX, CUSTOM_ENDPOINT_PREFIX } from "@/shared/constants/providers";
+import { validateSpec, specUrls } from "open-sse/handlers/customEndpoint/index.js";
+import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
+import { parseLogoUrl } from "@/shared/utils/logoUrl.js";
+import { isLocalRequest } from "@/dashboardGuard";
 import { generateId } from "@/shared/utils";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +36,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type } = body;
+    const { name, prefix, apiType, baseUrl, type, spec, logoUrl } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -40,6 +44,16 @@ export async function POST(request) {
 
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
+    }
+
+    // Optional brand logo. Only the scheme is enforced — the browser is what
+    // fetches it, so a private/LAN logo host stays usable.
+    let logo;
+    try {
+      // undefined, not "", so a blank field leaves no key in the JSON column.
+      logo = parseLogoUrl(logoUrl) || undefined;
+    } catch (logoError) {
+      return NextResponse.json({ error: logoError.message }, { status: 400 });
     }
 
     // Determine type
@@ -57,6 +71,7 @@ export async function POST(request) {
         apiType,
         baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
         name: name.trim(),
+        logoUrl: logo,
       });
       return NextResponse.json({ node }, { status: 201 });
     }
@@ -74,6 +89,7 @@ export async function POST(request) {
         prefix: prefix.trim(),
         baseUrl: sanitizedBaseUrl,
         name: name.trim(),
+        logoUrl: logo,
       });
       return NextResponse.json({ node }, { status: 201 });
     }
@@ -92,6 +108,42 @@ export async function POST(request) {
         prefix: prefix.trim(),
         baseUrl: sanitizedBaseUrl,
         name: name.trim(),
+        logoUrl: logo,
+      });
+      return NextResponse.json({ node }, { status: 201 });
+    }
+
+    if (nodeType === "custom-endpoint") {
+      // A recipe describes an upstream that speaks none of the known formats.
+      // Validate hard here so a bad shape never reaches the runtime, where a
+      // missing path would only surface as an unhelpful empty reply.
+      const errors = validateSpec(spec);
+      if (errors.length) {
+        return NextResponse.json({ error: `Invalid recipe: ${errors.join("; ")}` }, { status: 400 });
+      }
+
+      // Same SSRF stance as the validate route: a remote caller may not point
+      // a recipe at loopback or link-local addresses. Local callers may (that
+      // is the whole point of importing a self-hosted endpoint).
+      if (!isLocalRequest(request)) {
+        for (const url of specUrls(spec)) {
+          try {
+            // Placeholders are not yet substituted; swap them for a benign
+            // label so the URL parses while the host stays the real one.
+            assertPublicUrl(url.replace(/\{[^}]*\}/g, "x"));
+          } catch (error) {
+            return NextResponse.json({ error: `Recipe URL rejected: ${error.message}` }, { status: 400 });
+          }
+        }
+      }
+
+      const node = await createProviderNode({
+        id: `${CUSTOM_ENDPOINT_PREFIX}${generateId()}`,
+        type: "custom-endpoint",
+        prefix: prefix.trim(),
+        name: name.trim(),
+        logoUrl: logo,
+        spec,
       });
       return NextResponse.json({ node }, { status: 201 });
     }

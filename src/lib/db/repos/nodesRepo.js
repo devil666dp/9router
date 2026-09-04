@@ -55,14 +55,15 @@ export async function getProviderNodeById(id) {
 export async function createProviderNode(data) {
   const db = await getAdapter();
   const now = new Date().toISOString();
+  // A node's shape is open-ended: rowToNode spreads whatever sits in the JSON
+  // `data` column back out, and updateProviderNode merges freely. So keep every
+  // field the caller passed instead of an allow-list, which silently dropped
+  // each newly added one (logoUrl, spec, requiresApiKey, ...) on create only.
+  const { id, createdAt, updatedAt, ...rest } = data;
   const node = {
-    id: data.id || uuidv4(),
-    type: data.type,
-    name: data.name,
-    prefix: data.prefix,
-    apiType: data.apiType,
-    baseUrl: data.baseUrl,
-    createdAt: now,
+    ...rest,
+    id: id || uuidv4(),
+    createdAt: createdAt || now,
     updatedAt: now,
   };
   upsert(db, node);

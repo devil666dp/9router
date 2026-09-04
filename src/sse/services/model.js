@@ -59,6 +59,13 @@ export async function getModelInfo(modelStr) {
       if (matchedEmbedding) {
         return { provider: matchedEmbedding.id, model: parsed.model };
       }
+
+      // Checked last so an existing prefix always keeps winning.
+      const customEndpointNodes = await getProviderNodes({ type: "custom-endpoint" });
+      const matchedCustomEndpoint = customEndpointNodes.find((node) => node.prefix === parsed.providerAlias);
+      if (matchedCustomEndpoint) {
+        return { provider: matchedCustomEndpoint.id, model: parsed.model };
+      }
     }
     return {
       provider: parsed.provider,

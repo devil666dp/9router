@@ -11,6 +11,7 @@ import {
 } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
+import { safeLogoUrl } from "@/shared/utils/logoUrl";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import {
   FREE_PROVIDERS,
@@ -25,6 +26,7 @@ import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
+import AddCustomEndpointModal from "./components/AddCustomEndpointModal";
 import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
 
 function getStatusDisplay(connected, error, errorCode) {
@@ -102,6 +104,7 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(true);
   const [showAllApikey, setShowAllApikey] = useState(false);
   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
+  const [showAddCustomEndpointModal, setShowAddCustomEndpointModal] = useState(false);
   const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] =
     useState(false);
   const [testingMode, setTestingMode] = useState(null);
@@ -271,6 +274,7 @@ export default function ProvidersPage() {
       color: "#10A37F",
       textIcon: "OC",
       apiType: node.apiType,
+      logoUrl: node.logoUrl,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -283,6 +287,21 @@ export default function ProvidersPage() {
       name: node.name || "Anthropic Compatible",
       color: "#D97757",
       textIcon: "AC",
+      logoUrl: node.logoUrl,
+    }))
+    .filter(
+      (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
+    );
+
+  // Recipe-defined upstreams (bespoke body and/or create-then-poll protocol).
+  const customEndpointProviders = providerNodes
+    .filter((node) => node.type === "custom-endpoint")
+    .map((node) => ({
+      id: node.id,
+      name: node.name || "Custom Endpoint",
+      color: "#7C6BF2",
+      textIcon: "CE",
+      logoUrl: node.logoUrl,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -416,9 +435,18 @@ export default function ProvidersPage() {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            Custom Providers (OpenAI/Anthropic Compatible){" "}
+            Custom Providers{" "}
           </h2>
           <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="add"
+              onClick={() => setShowAddCustomEndpointModal(true)}
+              className="w-full sm:w-auto"
+            >
+              Add Custom Endpoint
+            </Button>
             <Button
               size="sm"
               icon="add"
@@ -439,14 +467,19 @@ export default function ProvidersPage() {
           </div>
         </div>
         {compatibleProviders.length === 0 &&
-        anthropicCompatibleProviders.length === 0 ? (
+        anthropicCompatibleProviders.length === 0 &&
+        customEndpointProviders.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
             <span className="material-symbols-outlined text-[18px]">extension</span>
-            <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
+            <span>No custom providers — use the buttons above to add a compatible or custom endpoint</span>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {[...compatibleProviders, ...anthropicCompatibleProviders].map(
+            {[
+              ...compatibleProviders,
+              ...anthropicCompatibleProviders,
+              ...customEndpointProviders,
+            ].map(
               (info) => (
                 <ApiKeyProviderCard
                   key={info.id}
@@ -661,6 +694,14 @@ export default function ProvidersPage() {
           setShowAddAnthropicCompatibleModal(false);
         }}
       />
+      <AddCustomEndpointModal
+        isOpen={showAddCustomEndpointModal}
+        onClose={() => setShowAddCustomEndpointModal(false)}
+        onCreated={(node) => {
+          setProviderNodes((prev) => [...prev, node]);
+          setShowAddCustomEndpointModal(false);
+        }}
+      />
 
       {/* Test Results Modal */}
       {testResults && (
@@ -830,6 +871,10 @@ function ApiKeyProviderCard({
   };
 
   const getIconPath = () => {
+    // A node the user gave a logo shows that logo, not the generic OpenAI /
+    // Anthropic mark. Blank or broken falls through to today's behaviour.
+    const logo = safeLogoUrl(provider.logoUrl);
+    if (logo) return logo;
     if (isCompatible && provider.apiType)
       return provider.apiType === "responses"
         ? "/providers/oai-r.png"
@@ -931,6 +976,7 @@ ApiKeyProviderCard.propTypes = {
     color: PropTypes.string,
     textIcon: PropTypes.string,
     apiType: PropTypes.string,
+    logoUrl: PropTypes.string,
   }).isRequired,
   stats: PropTypes.shape({
     connected: PropTypes.number,

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
+import { safeLogoUrl } from "@/shared/utils/logoUrl";
 
 // Kinds that support combos. Media combos run Fallback or Round Robin only — there is no
 // meaningful way for a judge to synthesize two audio files or two embedding vectors, so
@@ -68,7 +69,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) 
               style={{ backgroundColor: `${provider.color?.length > 7 ? provider.color : (provider.color ?? "#888") + "15"}` }}
             >
               <ProviderIcon
-                src={`/providers/${provider.id}.png`}
+                src={safeLogoUrl(provider.logoUrl) || `/providers/${provider.id}.png`}
                 alt={provider.name}
                 size={30}
                 className="object-contain rounded-lg max-w-[30px] max-h-[30px]"
@@ -194,6 +195,7 @@ export default function MediaProviderKindPage() {
     name: n.name || "Custom Embedding",
     color: "#6366F1",
     textIcon: "CE",
+    logoUrl: n.logoUrl,
   }));
 
   const allProviders = [...providers, ...customProviders];

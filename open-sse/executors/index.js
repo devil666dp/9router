@@ -24,6 +24,7 @@ import ZedExecutor from "./zed.js";
 import WindsurfExecutor from "./windsurf.js";
 import { DefaultExecutor } from "./default.js";
 import { DevinCliExecutor } from "./devin-cli.js";
+import { CustomEndpointExecutor } from "./customEndpoint.js";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -58,10 +59,19 @@ const executors = {
   "devin-cli": new DevinCliExecutor(),
 };
 
+const CUSTOM_ENDPOINT_PREFIX = "custom-endpoint-";
+
 const defaultCache = new Map();
+const customCache = new Map();
 
 export function getExecutor(provider) {
   if (executors[provider]) return executors[provider];
+  // Recipe-defined nodes: one executor per node id, cached like the default one.
+  // Checked after the static map so no built-in provider can be shadowed.
+  if (provider?.startsWith?.(CUSTOM_ENDPOINT_PREFIX)) {
+    if (!customCache.has(provider)) customCache.set(provider, new CustomEndpointExecutor(provider));
+    return customCache.get(provider);
+  }
   if (!defaultCache.has(provider)) defaultCache.set(provider, new DefaultExecutor(provider));
   return defaultCache.get(provider);
 }
@@ -83,6 +93,7 @@ export { CodexExecutor } from "./codex.js";
 export { CursorExecutor } from "./cursor.js";
 export { VertexExecutor } from "./vertex.js";
 export { DefaultExecutor } from "./default.js";
+export { CustomEndpointExecutor } from "./customEndpoint.js";
 export { OpenCodeExecutor } from "./opencode.js";
 export { GrokWebExecutor } from "./grok-web.js";
 export { GrokCliExecutor } from "./grok-cli.js";

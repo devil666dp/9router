@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Button, Badge, Input, Modal, Select } from "@/shared/components";
+import { Button, Badge, Input, LogoUrlInput, Modal, Select } from "@/shared/components";
 
 export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose, isAnthropic }) {
   const [formData, setFormData] = useState({
@@ -10,6 +10,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
     prefix: "",
     apiType: "chat",
     baseUrl: "https://api.openai.com/v1",
+    logoUrl: "",
   });
   const [saving, setSaving] = useState(false);
   const [checkKey, setCheckKey] = useState("");
@@ -24,6 +25,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
         prefix: node.prefix || "",
         apiType: node.apiType || "chat",
         baseUrl: node.baseUrl || (isAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
+        logoUrl: node.logoUrl || "",
       });
     }
   }, [node, isAnthropic]);
@@ -41,6 +43,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
         name: formData.name,
         prefix: formData.prefix,
         baseUrl: formData.baseUrl,
+        logoUrl: formData.logoUrl,
       };
       if (!isAnthropic) {
         payload.apiType = formData.apiType;
@@ -107,6 +110,12 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
           placeholder={isAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"}
           hint={`Use the base URL (ending in /v1) for your ${isAnthropic ? "Anthropic" : "OpenAI"}-compatible API.`}
         />
+        <LogoUrlInput
+          value={formData.logoUrl}
+          onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
+          fallbackText={isAnthropic ? "AC" : "OC"}
+          fallbackColor={isAnthropic ? "#D97757" : "#10A37F"}
+        />
         <div className="flex gap-2">
           <Input
             label="API Key (for Check)"
@@ -154,6 +163,7 @@ EditCompatibleNodeModal.propTypes = {
     prefix: PropTypes.string,
     apiType: PropTypes.string,
     baseUrl: PropTypes.string,
+    logoUrl: PropTypes.string,
   }),
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,

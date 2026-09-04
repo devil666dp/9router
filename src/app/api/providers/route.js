@@ -7,7 +7,7 @@ import {
   getProxyPoolById,
 } from "@/models";
 import { APIKEY_PROVIDERS } from "@/shared/constants/config";
-import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider, isCustomEndpointProvider } from "@/shared/constants/providers";
 import { normalizeProviderId, normalizeProviderSpecificData } from "@/lib/providerNormalization";
 
 export const dynamic = "force-dynamic";
@@ -111,12 +111,17 @@ export async function POST(request) {
       isWebCookieProvider ||
       isOpenAICompatibleProvider(provider) ||
       isAnthropicCompatibleProvider(provider) ||
-      isCustomEmbeddingProvider(provider);
+      isCustomEmbeddingProvider(provider) ||
+      isCustomEndpointProvider(provider);
 
     if (!provider || !isValidProvider) {
       return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
     }
-    if (!apiKey && provider !== "ollama-local") {
+    // Custom-endpoint recipes may declare `auth: "none"` (public Gradio spaces,
+    // self-hosted servers), so a keyless connection is legitimate there. The
+    // recipe decides whether a token is sent; buildHeaders omits the header
+    // entirely when there is none, rather than sending "Bearer undefined".
+    if (!apiKey && provider !== "ollama-local" && !isCustomEndpointProvider(provider)) {
       return NextResponse.json({ error: `${isWebCookieProvider ? "Cookie value" : "API Key"} is required` }, { status: 400 });
     }
     const connectionName = name || displayName || AI_PROVIDERS[provider]?.name;
@@ -158,6 +163,18 @@ export async function POST(request) {
         prefix: node.prefix,
         baseUrl: node.baseUrl,
         nodeName: node.name,
+      };
+    } else if (isCustomEndpointProvider(provider)) {
+      const node = await getProviderNodeById(provider);
+      if (!node) {
+        return NextResponse.json({ error: "Custom Endpoint node not found" }, { status: 404 });
+      }
+      // The recipe rides to the executor on the connection, the same way
+      // baseUrl does for the compatible node types.
+      providerSpecificData = {
+        prefix: node.prefix,
+        nodeName: node.name,
+        spec: node.spec,
       };
     }
 

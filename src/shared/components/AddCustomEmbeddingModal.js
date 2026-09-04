@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Modal, Input, Button, Badge } from "@/shared/components";
+import LogoUrlInput from "./LogoUrlInput";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
@@ -13,6 +14,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
     name: "",
     prefix: "",
     baseUrl: DEFAULT_BASE_URL,
+    logoUrl: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [checkKey, setCheckKey] = useState("");
@@ -30,9 +32,10 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         name: node.name || "",
         prefix: node.prefix || "",
         baseUrl: node.baseUrl || DEFAULT_BASE_URL,
+        logoUrl: node.logoUrl || "",
       });
     } else {
-      setFormData({ name: "", prefix: "", baseUrl: DEFAULT_BASE_URL });
+      setFormData({ name: "", prefix: "", baseUrl: DEFAULT_BASE_URL, logoUrl: "" });
     }
   }, [isOpen, isEdit, node]);
 
@@ -46,6 +49,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
         name: formData.name,
         prefix: formData.prefix,
         baseUrl: formData.baseUrl,
+        logoUrl: formData.logoUrl,
       };
       if (!isEdit) payload.type = "custom-embedding";
 
@@ -131,6 +135,12 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
           placeholder="https://api.voyageai.com/v1"
           hint="Most embedding APIs are OpenAI-compatible: Voyage, Cohere, Jina, Mistral, Together..."
         />
+        <LogoUrlInput
+          value={formData.logoUrl}
+          onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
+          fallbackText="CE"
+          fallbackColor="#6366F1"
+        />
         <Input
           label="API Key (for Check)"
           type="password"
@@ -179,5 +189,6 @@ AddCustomEmbeddingModal.propTypes = {
     name: PropTypes.string,
     prefix: PropTypes.string,
     baseUrl: PropTypes.string,
+    logoUrl: PropTypes.string,
   }),
 };

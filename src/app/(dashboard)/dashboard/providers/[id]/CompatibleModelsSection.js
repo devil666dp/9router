@@ -71,7 +71,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, isRecipe }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -163,7 +163,9 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-text-muted">
-        Add {isAnthropic ? "Anthropic" : "OpenAI"}-compatible models manually or import them from the /models endpoint.
+        {isRecipe
+          ? "Name the model ids this endpoint accepts. Whatever you type here is what {model} becomes in the recipe."
+          : `Add ${isAnthropic ? "Anthropic" : "OpenAI"}-compatible models manually or import them from the /models endpoint.`}
       </p>
 
       <div className="flex items-end gap-2 flex-wrap">
@@ -182,12 +184,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
         <Button size="sm" icon="add" onClick={handleAdd} disabled={!newModel.trim() || adding}>
           {adding ? "Adding..." : "Add"}
         </Button>
-        <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
-          {importing ? "Importing..." : "Import from /models"}
-        </Button>
+        {/* A recipe has one URL, not a /models endpoint — the button could only fail. */}
+        {!isRecipe && (
+          <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
+            {importing ? "Importing..." : "Import from /models"}
+          </Button>
+        )}
       </div>
 
-      {!canImport && (
+      {!canImport && !isRecipe && (
         <p className="text-xs text-text-muted">
           Add a connection to enable importing models.
         </p>
@@ -229,4 +234,5 @@ CompatibleModelsSection.propTypes = {
     isActive: PropTypes.bool,
   })).isRequired,
   isAnthropic: PropTypes.bool,
+  isRecipe: PropTypes.bool,
 };

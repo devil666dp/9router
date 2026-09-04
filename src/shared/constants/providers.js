@@ -84,6 +84,9 @@ export const MEDIA_PROVIDER_KINDS = [
 export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CUSTOM_EMBEDDING_PREFIX = "custom-embedding-";
+// Recipe-defined upstreams (bespoke body shape and/or create-then-poll protocol).
+// A sibling of the compatible types above, not a replacement for them.
+export const CUSTOM_ENDPOINT_PREFIX = "custom-endpoint-";
 
 export function isOpenAICompatibleProvider(providerId) {
   return typeof providerId === "string" && providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
@@ -95,6 +98,10 @@ export function isAnthropicCompatibleProvider(providerId) {
 
 export function isCustomEmbeddingProvider(providerId) {
   return typeof providerId === "string" && providerId.startsWith(CUSTOM_EMBEDDING_PREFIX);
+}
+
+export function isCustomEndpointProvider(providerId) {
+  return typeof providerId === "string" && providerId.startsWith(CUSTOM_ENDPOINT_PREFIX);
 }
 
 // All providers (combined)

@@ -8,9 +8,12 @@ import { planBulkAdd } from "@/shared/utils/bulkAdd";
 
 const BULK_PLACEHOLDER = `name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named`;
 
-export default function AddApiKeyModal({ isOpen, provider, providerName, isCompatible, isAnthropic, authType, authHint, website, proxyPools, error, existingNames, onSave, onBulkDone, onClose }) {
+export default function AddApiKeyModal({ isOpen, provider, providerName, isCompatible, isAnthropic, isCustomEndpoint, authType, authHint, website, proxyPools, error, existingNames, onSave, onBulkDone, onClose }) {
   const NONE_PROXY_POOL_VALUE = "__none__";
   const isOllamaLocal = provider === "ollama-local";
+  // A custom-endpoint recipe may declare `auth: "none"` (public Gradio spaces,
+  // self-hosted servers), so the key is optional for that node type only.
+  const keyOptional = isOllamaLocal || !!isCustomEndpoint;
   const isCookie = authType === "cookie";
   const isXaiApiKey = provider === "xai" && !isCookie;
   const credentialLabel = isCookie ? "Cookie Value" : provider === "qoder" ? "Personal Access Token (PAT)" : "API Key";
@@ -92,7 +95,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
 
   const handleSubmit = async () => {
     if (!provider) return;
-    if (!isOllamaLocal && !formData.apiKey) return;
+    if (!keyOptional && !formData.apiKey) return;
     if (!isOllamaLocal) {
       // Non-ollama providers require a name
       if (!formData.name) return;
@@ -260,7 +263,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               className="flex-1"
             />
             <div className="pt-6">
-              <Button onClick={handleValidate} disabled={!formData.apiKey || validating || saving} variant="secondary">
+              <Button onClick={handleValidate} disabled={(!formData.apiKey && !isCustomEndpoint) || validating || saving} variant="secondary">
                 {validating ? "Checking..." : "Check"}
               </Button>
             </div>
@@ -292,12 +295,17 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
             options={providerRegions.map((r) => ({ value: r.id, label: r.label }))}
           />
         )}
+        {isCustomEndpoint && (
+          <p className="text-xs text-text-muted">
+            Leave the key blank if this recipe uses <code>auth: &quot;none&quot;</code>.
+          </p>
+        )}
         {isCompatible && (
           <Input
             label="Default Model"
             value={formData.defaultModel}
             onChange={(e) => setFormData({ ...formData, defaultModel: e.target.value })}
-            placeholder={isAnthropic ? "claude-3-5-sonnet-latest" : "gpt-4o-mini"}
+            placeholder={isCustomEndpoint ? "my-model" : isAnthropic ? "claude-3-5-sonnet-latest" : "gpt-4o-mini"}
           />
         )}
         {isOllamaLocal && (
@@ -315,7 +323,9 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         )}
         {isCompatible && (
           <p className="text-xs text-text-muted">
-            Enter the model ID exactly as your compatible endpoint expects it. This model will be saved as the connection default.
+            {isCustomEndpoint
+              ? "Enter the model ID the recipe should substitute for {model}. This model will be saved as the connection default."
+              : "Enter the model ID exactly as your compatible endpoint expects it. This model will be saved as the connection default."}
           </p>
         )}
         {isCloudflareAi && (
@@ -393,7 +403,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         </p>
 
         <div className="flex gap-2">
-          <Button onClick={handleSubmit} fullWidth disabled={saving || (!isOllamaLocal && (!formData.name || !formData.apiKey)) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
+          <Button onClick={handleSubmit} fullWidth disabled={saving || (!formData.name && !isOllamaLocal) || (!keyOptional && !formData.apiKey) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
             {saving ? "Saving..." : "Save"}
           </Button>
           <Button onClick={onClose} variant="ghost" fullWidth>
@@ -412,6 +422,7 @@ AddApiKeyModal.propTypes = {
   providerName: PropTypes.string,
   isCompatible: PropTypes.bool,
   isAnthropic: PropTypes.bool,
+  isCustomEndpoint: PropTypes.bool,
   authType: PropTypes.string,
   authHint: PropTypes.string,
   website: PropTypes.string,
