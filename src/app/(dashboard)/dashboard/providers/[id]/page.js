@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
 import { safeLogoUrl } from "@/shared/utils/logoUrl";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal, CapabilitiesCard } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEndpointProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -1174,7 +1174,7 @@ export default function ProviderDetailPage() {
               onDisable={() => handleDisableModel(model.id)}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
-            />
+              />
           );
         })}
 
@@ -1804,6 +1804,16 @@ export default function ProviderDetailPage() {
         models={playgroundModels}
         connections={connections.filter((c) => c.isActive !== false)}
         isFreeNoAuth={isFreeNoAuth}
+      />
+
+      {/* Capabilities — probe a model's real modality/tool/search support */}
+      <CapabilitiesCard
+        providerAlias={providerStorageAlias}
+        providerDisplayAlias={providerDisplayAlias}
+        models={playgroundModels}
+        getCaps={getCaps}
+        canTest={connections.length > 0 || isFreeNoAuth}
+        disabledReason="Add a connection to this provider to run capability tests."
       />
 
       {bulkActionModal}

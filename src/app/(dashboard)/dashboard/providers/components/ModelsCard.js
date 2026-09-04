@@ -2,13 +2,18 @@
 
 import { useState, useCallback, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Modal } from "@/shared/components";
+import { Card, Button, Modal, CapacityBadges, CapabilitiesCard } from "@/shared/components";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useModelCaps } from "@/shared/hooks/useModelCaps";
+
+// Capability probes go through /v1/chat/completions, so they only mean anything
+// for the chat-shaped kinds. An embedding or TTS model has no such request.
+const CHAT_KINDS = new Set(["llm", "imageToText"]);
 
 // ── ModelRow ───────────────────────────────────────────────────
-export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting }) {
+export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, caps }) {
   const borderColor = testStatus === "ok" ? "border-green-500/40" : testStatus === "error" ? "border-red-500/40" : "border-border";
   const iconColor = testStatus === "ok" ? "#22c55e" : testStatus === "error" ? "#ef4444" : undefined;
 
@@ -18,9 +23,12 @@ export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCusto
         <span className="material-symbols-outlined text-base" style={iconColor ? { color: iconColor } : undefined}>
           {testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "smart_toy"}
         </span>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
-          {model.name && <span className="text-[9px] text-text-muted/70 italic pl-1">{model.name}</span>}
+          <span className="flex min-w-0 items-center gap-1 pl-1">
+            {model.name && <span className="truncate text-[9px] text-text-muted/70 italic">{model.name}</span>}
+            <CapacityBadges caps={caps} colorOverride="text-text-muted/70" size={12} />
+          </span>
         </div>
         {onTest && (
           <div className="relative group/btn">
@@ -64,6 +72,7 @@ ModelRow.propTypes = {
   onDeleteAlias: PropTypes.func,
   onTest: PropTypes.func,
   isTesting: PropTypes.bool,
+  caps: PropTypes.object,
 };
 
 // ── AddCustomModelModal ────────────────────────────────────────
@@ -117,8 +126,11 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
   const [testError, setTestError] = useState("");
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
 
+  const { getCaps } = useModelCaps();
+
   const providerAlias = providerAliasOverride || getProviderAlias(providerId);
   const effectiveType = kindFilter || "llm";
+  const canTestCapabilities = CHAT_KINDS.has(effectiveType);
 
   const fetchData = useCallback(async () => {
     try {
@@ -241,6 +253,7 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
                 onTest={() => handleTestModel(model.id)}
                 isTesting={testingModelId === model.id}
                 isFree={model.isFree}
+                caps={getCaps(fullModel)}
               />
             );
           })}
@@ -258,6 +271,7 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
               onTest={() => handleTestModel(model.id)}
               isTesting={testingModelId === model.id}
               isCustom
+              caps={getCaps(`${providerAlias}/${model.id}`)}
             />
           ))}
 
@@ -270,6 +284,16 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
           </button>
         </div>
       </Card>
+
+      {/* Capability probes only make sense for chat-shaped kinds. */}
+      {canTestCapabilities && (
+        <CapabilitiesCard
+          providerAlias={providerAlias}
+          providerDisplayAlias={providerAlias}
+          models={[...displayModels, ...myCustomModels].map((m) => ({ id: m.id, name: m.name || m.id }))}
+          getCaps={getCaps}
+        />
+      )}
 
       <AddCustomModelModal
         isOpen={showAddCustomModel}

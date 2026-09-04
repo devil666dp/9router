@@ -3,6 +3,7 @@ import { getModelAliases, setModelAlias, getCustomModels } from "@/models";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
+import { pickUiCaps } from "@/shared/constants/models";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 
 // GET /api/models - Get models with aliases
@@ -27,13 +28,7 @@ export async function GET() {
           fullModel,
           routedModel,
           alias: modelAliases[fullModel] || m.model,
-          caps: {
-            vision: c.vision,
-            search: c.search,
-            reasoning: c.reasoning,
-            contextWindow: c.contextWindow,
-            maxOutput: c.maxOutput,
-          },
+          caps: pickUiCaps(c),
         };
       });
 
@@ -53,14 +48,7 @@ export async function GET() {
         fullModel,
         routedModel: fullModel,
         alias: modelAliases[fullModel] || m.id,
-        caps: {
-          vision: c.vision,
-          search: c.search,
-          reasoning: c.reasoning,
-          contextWindow: c.contextWindow,
-          maxOutput: c.maxOutput,
-          ...(m.caps || {}),
-        },
+        caps: pickUiCaps(c, m.caps),
       });
     }
 

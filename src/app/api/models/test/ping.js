@@ -37,7 +37,13 @@ function createSilentWavFile() {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-async function getInternalHeaders() {
+// Base URL of this very server — every probe goes back through /api/v1 so it
+// exercises the real routing path (translation, account fallback, executors).
+export function internalBaseUrl() {
+  return `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`;
+}
+
+export async function getInternalHeaders() {
   let apiKey = null;
   try {
     const keys = await getApiKeys();
@@ -50,7 +56,7 @@ async function getInternalHeaders() {
   return headers;
 }
 
-export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
+export async function pingModelByKind(model, kind, baseUrl = internalBaseUrl()) {
   const headers = await getInternalHeaders();
   const start = Date.now();
 

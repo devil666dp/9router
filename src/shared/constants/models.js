@@ -40,8 +40,33 @@ export const AI_MODELS = Object.entries(MODELS).flatMap(([alias, models]) =>
 export const getModelKind = (m, fallback = null) => m?.kind || m?.type || fallback;
 
 // Capacity metadata for UI badges — icon + label + color per capability.
+// CapacityBadges renders exactly the keys listed here, in this order.
 export const CAPACITY_META = {
   vision: { icon: "visibility", label: "Vision", desc: "Supports image input", color: "text-blue-500" },
-  // search: temporarily hidden (feature not wired yet)
+  pdf: { icon: "picture_as_pdf", label: "Documents", desc: "Supports PDF / document input", color: "text-rose-500" },
+  audioInput: { icon: "graphic_eq", label: "Audio in", desc: "Supports audio input", color: "text-violet-500" },
+  videoInput: { icon: "movie", label: "Video in", desc: "Supports video input", color: "text-cyan-500" },
+  tools: { icon: "handyman", label: "Tools", desc: "Supports tool / function calling", color: "text-emerald-500" },
+  search: { icon: "travel_explore", label: "Web search", desc: "Supports web search", color: "text-sky-500" },
   reasoning: { icon: "neurology", label: "Reasoning", desc: "Supports reasoning / thinking", color: "text-amber-500" },
 };
+
+// Capabilities the dashboard can verify against the live provider, in the order
+// an "all" sweep runs them (cheap text-only probes first). The probe module
+// (src/app/api/models/test/probes.js) imports this list, so adding a probe here
+// without a matching probe fn there is a 400, not a silent no-op.
+export const PROBE_CAPABILITIES = ["tools", "vision", "pdf", "audioInput", "videoInput", "search"];
+
+// The caps fields the dashboard consumes. One list so /api/models and
+// useModelCaps cannot drift apart (they both project getCapabilitiesForModel).
+export const UI_CAP_KEYS = [
+  "vision", "pdf", "audioInput", "videoInput", "tools", "search", "reasoning",
+  "contextWindow", "maxOutput",
+];
+
+// Project a full capabilities object down to what the UI needs.
+export function pickUiCaps(c, extra) {
+  const out = {};
+  for (const k of UI_CAP_KEYS) out[k] = c?.[k];
+  return extra ? { ...out, ...extra } : out;
+}

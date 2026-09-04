@@ -7,6 +7,8 @@ export const OPENAI_BLOCK = {
   IMAGE: "image",
   INPUT_AUDIO: "input_audio",
   AUDIO_URL: "audio_url",
+  VIDEO_URL: "video_url",
+  INPUT_VIDEO: "input_video",
   FILE: "file",
   FUNCTION: "function",
 };
@@ -41,7 +43,10 @@ export const RESPONSES_ITEM = {
 
 // Valid OpenAI block types (used by filterToOpenAIFormat).
 export const VALID_OPENAI_CONTENT_TYPES = [
-  OPENAI_BLOCK.TEXT, OPENAI_BLOCK.IMAGE_URL, OPENAI_BLOCK.IMAGE, OPENAI_BLOCK.INPUT_AUDIO, OPENAI_BLOCK.AUDIO_URL, OPENAI_BLOCK.FILE,
+  OPENAI_BLOCK.TEXT, OPENAI_BLOCK.IMAGE_URL, OPENAI_BLOCK.IMAGE, OPENAI_BLOCK.INPUT_AUDIO, OPENAI_BLOCK.AUDIO_URL,
+  // video_url is the shape Qwen-VL / dashscope-style OpenAI-compatible upstreams accept;
+  // keeping it here stops filterToOpenAIFormat from silently dropping video input.
+  OPENAI_BLOCK.VIDEO_URL, OPENAI_BLOCK.INPUT_VIDEO, OPENAI_BLOCK.FILE,
 ];
 export const VALID_OPENAI_MESSAGE_TYPES = [
   OPENAI_BLOCK.TEXT, OPENAI_BLOCK.IMAGE_URL, OPENAI_BLOCK.IMAGE, "tool_calls", CLAUDE_BLOCK.TOOL_RESULT,

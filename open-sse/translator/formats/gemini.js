@@ -87,6 +87,18 @@ export function convertOpenAIContentToParts(content) {
             inlineData: { mime_type: mimeType, data: data }
           });
         }
+      } else if ((item.type === OPENAI_BLOCK.VIDEO_URL || item.type === OPENAI_BLOCK.INPUT_VIDEO) && (item.video_url?.url || item.url)) {
+        // Video input: gemini takes inlineData for a data URI, fileData for a remote URL.
+        const url = item.video_url?.url || item.url;
+        if (url.startsWith("data:")) {
+          const commaIndex = url.indexOf(",");
+          if (commaIndex !== -1) {
+            const mimeType = url.substring(5, commaIndex).split(";")[0];
+            parts.push({ inlineData: { mime_type: mimeType, data: url.substring(commaIndex + 1) } });
+          }
+        } else if (url.startsWith("http://") || url.startsWith("https://")) {
+          parts.push({ fileData: { fileUri: url, mimeType: "video/*" } });
+        }
       } else if (item.type === OPENAI_BLOCK.FILE && item.file?.file_data?.startsWith("data:")) {
         const url = item.file.file_data;
         const commaIndex = url.indexOf(",");

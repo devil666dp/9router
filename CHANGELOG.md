@@ -97,6 +97,19 @@
 - **Chat**: `POST /v1/chat/completions` now honours the `x-connection-id` header
   to pin a request to one account, matching the image and video handlers. Account
   fallback still applies if the pinned account fails
+- **Dashboard**: every provider detail page gains a **Capabilities** card below
+  the Playground — pick a model and verify, against the live upstream, whether it
+  really accepts image, PDF, audio and video input, calls tools, or searches the
+  web. Test one capability or all six; each row shows the verdict next to what the
+  registry declares, the latency, and the provider's own error text when it fails
+- **Capabilities**: `POST /api/models/test` accepts `{model, capability}` (or
+  `capability:"all"`) and probes the upstream instead of trusting
+  `getCapabilitiesForModel`. Each media probe sends a fixture with a 4-digit
+  number embedded in it and passes only when the model reads that number back, so
+  a 200 with no comprehension is still a failure. Verdicts are three-valued —
+  auth, quota, timeout and 5xx report "couldn't tell" rather than "not supported"
+- **Capabilities**: the model badges now cover documents, audio in, video in,
+  tools and web search, not just vision and reasoning
 
 ## Fixes
 - **Proxy pools**: `PUT /api/proxy-pools/[id]` validated `type` against a list

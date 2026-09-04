@@ -38,6 +38,7 @@ export { default as SegmentedControl } from "./SegmentedControl";
 export { default as Tooltip } from "./Tooltip";
 export { default as ProviderInfoCard } from "./ProviderInfoCard";
 export { default as CapacityBadges } from "./CapacityBadges";
+export { default as CapabilitiesCard } from "./CapabilitiesCard";
 export { default as FieldRow } from "./FieldRow";
 export { default as LogoUrlInput } from "./LogoUrlInput";
 

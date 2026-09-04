@@ -67,6 +67,12 @@ export const DEFAULT_MIN_TOKENS = 32000;
 
 export const TOKEN_SAVER_HEADER = "x-9router-token-saver";
 
+// Capability probe marker (dashboard "test capabilities" buttons). A probe deliberately
+// sends media/tools a model may not declare support for, so it opts out of the two
+// guards that would otherwise rewrite the request and make the result meaningless:
+// the modality strip (chatCore) and the capacity adapter reroute (sse/handlers/chat).
+export const CAPABILITY_PROBE_HEADER = "x-9router-capability-probe";
+
 // Retry config for 429 responses (legacy - kept for backward compatibility)
 export const RETRY_CONFIG = {
   maxAttempts: 2,
