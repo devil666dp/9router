@@ -1,0 +1,192 @@
+name: Publish CLI to npm
+
+# The npm artifact is the CLI launcher in cli/ (bin: 9router), which bundles a
+# production Next.js standalone build of the dashboard/gateway into cli/app/.
+# Root package.json is `private: true` and is never published.
+#
+# A `v*` tag ships both images (docker-publish.yml) and this npm package, so one
+# tag is one release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and pack only — inspect the tarball, publish nothing"
+        required: false
+        default: false
+        type: boolean
+      dist_tag:
+        description: "npm dist-tag. Leave empty to derive it from the version (prerelease -> its channel, else latest)."
+        required: false
+        type: string
+      provenance:
+        description: "Attach an npm provenance attestation (needs a public repo)"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance signing
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Publishes are immutable: npm refuses to overwrite a version that already
+      # exists. Resolving that up front turns a re-run into a clean skip instead
+      # of a red EPUBLISHCONFLICT, and catches a tag that disagrees with the
+      # version actually being packed.
+      - name: Resolve version and check npm
+        id: pkg
+        run: |
+          set -euo pipefail
+          NAME=$(node -p "require('./cli/package.json').name")
+          VERSION=$(node -p "require('./cli/package.json').version")
+          echo "name=$NAME"       >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$TAG_VERSION" != "$VERSION" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME implies version $TAG_VERSION but cli/package.json is $VERSION. Bump cli/package.json, then re-tag."
+              exit 1
+            fi
+          fi
+
+          # Derive the dist-tag unless one was passed: 1.0.0-beta.2 -> beta.
+          TAG_INPUT="${INPUT_DIST_TAG:-}"
+          if [ -n "$TAG_INPUT" ]; then
+            DIST_TAG="$TAG_INPUT"
+          else
+            PRERELEASE="${VERSION#*-}"
+            if [ "$PRERELEASE" != "$VERSION" ]; then
+              DIST_TAG=$(printf '%s' "$PRERELEASE" | cut -d. -f1)
+            else
+              DIST_TAG=latest
+            fi
+          fi
+          echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+
+          # Default provenance on; only an explicit `false` from a manual run disables it.
+          if [ "${INPUT_PROVENANCE:-}" = "false" ]; then
+            echo "provenance=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "provenance=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NAME@$VERSION is already on npm — nothing to publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          INPUT_DIST_TAG: ${{ inputs.dist_tag }}
+          INPUT_PROVENANCE: ${{ inputs.provenance }}
+
+      - name: Check NPM_TOKEN
+        if: steps.pkg.outputs.already_published == 'false' && inputs.dry_run != true
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::Repository secret NPM_TOKEN is not set. Create an npm Automation token (npmjs.com -> Access Tokens) and add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install root dependencies
+        if: steps.pkg.outputs.already_published == 'false'
+        run: npm ci --no-audit --no-fund
+
+      # cli/ has no lockfile of its own, so npm install (not ci). Its only deps
+      # are the esbuild/nodemon toolchain plus react — sql.js, better-sqlite3 and
+      # systray2 are deliberately installed into ~/.9router/runtime at postinstall
+      # time instead of being bundled.
+      - name: Install CLI dependencies
+        if: steps.pkg.outputs.already_published == 'false'
+        working-directory: cli
+        run: npm install --no-audit --no-fund
+
+      # cli/scripts/build-cli.js: syncs the version into root package.json, runs
+      # the Next standalone build with NEXT_TRACING_ROOT_MODE=workspace, copies the
+      # output into cli/app/, bundles the MITM server, and asserts the /v1 route
+      # artifacts survived trace-pruning.
+      - name: Build CLI package
+        if: steps.pkg.outputs.already_published == 'false'
+        working-directory: cli
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Verify bundle
+        if: steps.pkg.outputs.already_published == 'false'
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in \
+            cli/app/server.js \
+            cli/app/custom-server.js \
+            cli/app/.next-cli-build/server/app/api/v1/chat/completions/route.js \
+            cli/app/.next-cli-build/server/app/api/v1/messages/route.js \
+            cli/app/src/mitm/server.js
+          do
+            if [ ! -f "$f" ]; then echo "::error::Missing from bundle: $f"; missing=1; fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Bundle size: $(du -sh cli/app | cut -f1)"
+
+      # prepublishOnly re-runs the whole Next build, so --ignore-scripts keeps the
+      # publish step from rebuilding what the previous step just built and verified.
+      - name: Pack (dry run)
+        if: steps.pkg.outputs.already_published == 'false'
+        working-directory: cli
+        run: npm publish --dry-run --access public --ignore-scripts
+
+      - name: Publish to npm
+        if: steps.pkg.outputs.already_published == 'false' && inputs.dry_run != true
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          flags=(--access public --ignore-scripts --tag "$DIST_TAG")
+          if [ "$PROVENANCE" = "true" ]; then
+            flags+=(--provenance)
+          fi
+          npm publish "${flags[@]}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.pkg.outputs.dist_tag }}
+          PROVENANCE: ${{ steps.pkg.outputs.provenance }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### npm"
+            echo ""
+            if [ "${{ steps.pkg.outputs.already_published }}" = "true" ]; then
+              echo "Skipped — \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\` is already published."
+            elif [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "Dry run — built and packed \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\`, published nothing."
+            else
+              echo "Published \`${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}\` under dist-tag \`${{ steps.pkg.outputs.dist_tag }}\`."
+              echo ""
+              echo '```bash'
+              echo "npm i -g ${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

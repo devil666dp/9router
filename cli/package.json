@@ -1,7 +1,19 @@
 {
-  "name": "9router",
+  "name": "@dipandhali2021/9router",
   "version": "0.5.65",
   "description": "9Router CLI - Start and manage 9Router server",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dipandhali2021/9router.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/dipandhali2021/9router#readme",
+  "bugs": {
+    "url": "https://github.com/dipandhali2021/9router/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "9router": "./cli.js"
   },

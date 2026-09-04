@@ -1,6 +1,15 @@
 # Unreleased
 
 ## Features
+- **Release**: publish the CLI to npm from CI — `.github/workflows/npm-publish.yml`
+  builds `cli/` on a `v*` tag (or a manual run), verifies the bundled Next
+  standalone output still contains `server.js`, `custom-server.js`, the `/v1`
+  route artifacts and the MITM server, then publishes with provenance. It asserts
+  the tag matches `cli/package.json` and skips cleanly when that version is
+  already on npm, so re-running a release is not an error
+- **Release**: this fork publishes as `@dipandhali2021/9router` (the `9router`
+  bin name is unchanged). The in-app self-updater and `npx` relaunch follow via
+  `UPDATER_CONFIG.npmPackageName`
 - **Providers**: add `qwen` (QwenCloud / DashScope, Singapore endpoint) as a
   media provider — 21 image models (Qwen-Image 3.0/2.0, the edit line, Z-Image,
   Wan 2.7-2.1 text-to-image) and 33 video models (Wan 3.0, Wan 2.7 i2v/t2v/r2v/
