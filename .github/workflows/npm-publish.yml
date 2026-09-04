@@ -109,9 +109,18 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # package-lock.json is gitignored in this repo (upstream's choice — a committed
+      # lock would conflict on every upstream sync), so CI has no lockfile to `npm ci`
+      # from. `npm install` is the same path the Dockerfile takes. If a lockfile ever
+      # does get committed, prefer the faster reproducible install automatically.
       - name: Install root dependencies
         if: steps.pkg.outputs.already_published == 'false'
-        run: npm ci --no-audit --no-fund
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
 
       # cli/ has no lockfile of its own, so npm install (not ci). Its only deps
       # are the esbuild/nodemon toolchain plus react — sql.js, better-sqlite3 and
