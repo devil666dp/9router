@@ -110,8 +110,29 @@
   auth, quota, timeout and 5xx report "couldn't tell" rather than "not supported"
 - **Capabilities**: the model badges now cover documents, audio in, video in,
   tools and web search, not just vision and reasoning
+- **Dashboard**: the console log page is now a structured live console instead of a
+  scrolling text dump. Every console line is parsed once server-side into a record
+  (level, request id, lifecycle symbol, parsed fields), and a request's lines fold
+  into one expandable row carrying its route, format, latency, TTFT, token counts,
+  account and outcome. Adds a live stats strip (req/min, p50/p95, error rate,
+  in-flight), facet filters over provider/model/status, full-text search, a
+  severity floor, a list + detail inspector with a link through to the full
+  request details, `.log`/JSON export, a raw-text toggle, and filters plus buffer
+  size persisted across reloads. Defaults to API calls only — everything the
+  gateway prints outside a request is one toggle away
+- **Logs**: every lifecycle line now carries a per-request id (`[12:30:58] #00nx`),
+  so the ▶ / ⚙ / 📊 / ✗ / 🔑 lines of concurrent requests can be correlated. Only
+  8 session dots exist, so two requests on one provider used to be
+  indistinguishable
+- **Observability**: `requestDetails` rows record the same request id (additive
+  column + index), and `/api/usage/request-details` accepts `reqId`, so a line in
+  the console links straight to its stored payloads
 
 ## Fixes
+- **Logs**: a custom provider node printed its generated id
+  (`openai-compatible-chat-<uuid>`) on both sides of every request line; it now
+  prints the prefix you actually type. The arrow is also dropped when the client
+  asked for exactly the route it resolved to, instead of repeating it twice
 - **Proxy pools**: `PUT /api/proxy-pools/[id]` validated `type` against a list
   that predated the Deno relay, so editing a Deno pool silently reset it to
   `http` and sent its traffic through a proxy agent instead of relay headers

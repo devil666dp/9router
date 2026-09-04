@@ -27,15 +27,34 @@ export async function GET(request) {
     start(controller) {
       // Send all buffered logs immediately on connect
       const buffered = getConsoleLogs();
+      // appendRecord() pushes to the ring buffer and to the pending-flush queue in the
+      // same call, so a viewer connecting between the two gets a line in `init` AND
+      // again in the next `lines` batch. Remember how far `init` reached and drop
+      // anything at or below it — otherwise the client renders duplicate seqs and React
+      // warns about repeated keys.
+      let sentThrough = buffered.length ? buffered[buffered.length - 1].seq || 0 : 0;
       if (buffered.length > 0) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "init", logs: buffered })}\n\n`));
       }
 
+      const fresh = (records) => {
+        const out = [];
+        for (const record of records) {
+          const seq = record?.seq || 0;
+          if (seq && seq <= sentThrough) continue;
+          if (seq > sentThrough) sentThrough = seq;
+          out.push(record);
+        }
+        return out;
+      };
+
       // Push new lines as they arrive
       state.send = (line) => {
         if (state.closed) return;
+        const [next] = fresh(line ? [line] : []);
+        if (!next) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "line", line })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "line", line: next })}\n\n`));
         } catch {
           cleanup();
         }
@@ -43,8 +62,10 @@ export async function GET(request) {
 
       state.sendLines = (lines) => {
         if (state.closed || !Array.isArray(lines) || lines.length === 0) return;
+        const next = fresh(lines);
+        if (!next.length) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "lines", lines })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "lines", lines: next })}\n\n`));
         } catch {
           cleanup();
         }
@@ -53,6 +74,7 @@ export async function GET(request) {
       // Notify client when cleared
       state.sendClear = () => {
         if (state.closed) return;
+        sentThrough = 0;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "clear" })}\n\n`));
         } catch {

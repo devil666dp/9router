@@ -69,7 +69,7 @@ function UsageContent() {
         </Suspense>
       )}
       {activeTab === "logs" && <RequestLogger />}
-      {activeTab === "details" && <RequestDetailsTab />}
+      {activeTab === "details" && <RequestDetailsTab reqId={searchParams.get("reqId") || ""} />}
     </div>
   );
 }

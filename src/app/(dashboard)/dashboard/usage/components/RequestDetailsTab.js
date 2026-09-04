@@ -99,7 +99,7 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
-export default function RequestDetailsTab() {
+export default function RequestDetailsTab({ reqId = "" }) {
   const [details, setDetails] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -117,6 +117,12 @@ export default function RequestDetailsTab() {
     startDate: "",
     endDate: ""
   });
+  // reqId arrives from /dashboard/usage?tab=details&reqId=… — the console links here
+  // rather than duplicating this drawer. It's derived from the prop rather than copied
+  // into state, so a later navigation to a different id is picked up on render; only the
+  // id the user actually dismissed is suppressed.
+  const [dismissedReqId, setDismissedReqId] = useState("");
+  const activeReqId = reqId && reqId !== dismissedReqId ? reqId : "";
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -139,6 +145,7 @@ export default function RequestDetailsTab() {
         pageSize: pagination.pageSize.toString()
       });
       if (filters.provider) params.append("provider", filters.provider);
+      if (activeReqId) params.append("reqId", activeReqId);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
 
@@ -152,7 +159,7 @@ export default function RequestDetailsTab() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.pageSize, filters]);
+  }, [pagination.page, pagination.pageSize, filters, activeReqId]);
 
   useEffect(() => {
     fetchProviders();
@@ -177,10 +184,28 @@ export default function RequestDetailsTab() {
 
   const handleClearFilters = () => {
     setFilters({ provider: "", startDate: "", endDate: "" });
+    if (reqId) setDismissedReqId(reqId);
   };
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {activeReqId && (
+        <Card padding="sm" className="flex items-center gap-2.5">
+          <span className="material-symbols-outlined text-[18px] text-brand-500">filter_alt</span>
+          <span className="text-sm text-text-muted">
+            Showing the request logged as{" "}
+            <span className="font-mono font-semibold text-text-main">#{activeReqId}</span> in the console.
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setDismissedReqId(reqId)}
+          >
+            Show all
+          </Button>
+        </Card>
+      )}
       <Card padding="md">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex min-w-0 flex-col gap-2">
@@ -238,7 +263,7 @@ export default function RequestDetailsTab() {
             <Button 
               variant="ghost" 
               onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.startDate && !filters.endDate}
+              disabled={!filters.provider && !filters.startDate && !filters.endDate && !activeReqId}
               className="w-full"
             >
               Clear Filters

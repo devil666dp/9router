@@ -44,6 +44,9 @@ const DEFAULT_SETTINGS = {
   observabilityBatchSize: 20,
   observabilityFlushIntervalMs: 5000,
   observabilityMaxJsonSize: 5,
+  // Console viewer ring buffer (src/lib/consoleLogBuffer.js). Lines are held in
+  // process memory, so this trades RAM for scroll-back depth.
+  consoleBufferMaxLines: 500,
   outboundProxyEnabled: false,
   outboundProxyUrl: "",
   outboundNoProxy: "",

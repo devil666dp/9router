@@ -1,5 +1,5 @@
 // Re-export from open-sse with localDb integration
-import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb";
+import { getModelAliases, getComboByName, getProviderNodes, getProviderNodeById } from "@/lib/localDb";
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
 
@@ -98,4 +98,40 @@ export async function getComboModels(modelStr) {
     return combo.models;
   }
   return null;
+}
+
+/**
+ * Human-readable provider name for log lines and the console viewer.
+ *
+ * Custom provider nodes are stored under a generated id ("openai-compatible-chat-<uuid>").
+ * Routing needs that id, but printing it makes every log line unreadable. Resolve it to
+ * the prefix the user actually types (falling back to the node's display name). Built-in
+ * providers already read well and never hit the DB.
+ *
+ * Cached briefly: this runs on every request, and a node's prefix changes only when the
+ * user edits it — a few seconds of staleness in a log label costs nothing.
+ *
+ * Never throws — a label is cosmetic and must not be able to fail a request.
+ */
+const LABEL_CACHE_TTL_MS = 30000;
+const labelCache = new Map();
+
+export async function resolveProviderLabel(providerId) {
+  if (typeof providerId !== "string" || !providerId) return providerId;
+  // Built-in providers own their ids and aliases; only user-created nodes need a lookup.
+  if (RESERVED_PROVIDER_PREFIXES.has(providerId)) return providerId;
+
+  const cached = labelCache.get(providerId);
+  if (cached && (Date.now() - cached.at) < LABEL_CACHE_TTL_MS) return cached.label;
+
+  let label = providerId;
+  try {
+    const node = await getProviderNodeById(providerId);
+    label = node?.prefix?.trim() || node?.name?.trim() || providerId;
+  } catch {
+    // DB unavailable — fall back to the id rather than failing the request.
+    return providerId;
+  }
+  labelCache.set(providerId, { label, at: Date.now() });
+  return label;
 }

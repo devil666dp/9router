@@ -69,6 +69,9 @@ export function buildRequestDetail(base, overrides = {}) {
     provider: base.provider || "unknown",
     model: base.model || "unknown",
     connectionId: base.connectionId || undefined,
+    // Short console request id (logger.nextReqId) — lets the console viewer link a
+    // live log line to its persisted record. Absent when the caller has no id.
+    reqId: base.reqId || undefined,
     timestamp: new Date().toISOString(),
     latency: base.latency || { ttft: 0, total: 0 },
     tokens: base.tokens || { prompt_tokens: 0, completion_tokens: 0 },

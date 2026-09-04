@@ -32,15 +32,27 @@ export function tagForSession(seed) {
   return REQ_TAGS[Math.abs(h) % REQ_TAGS.length];
 }
 
-// Print one correlated line: [time] tag symbol message
-export function line(tag, symbol, message) {
+// Per-request id, unique within one process run. Only 8 session dots exist, so two
+// concurrent requests on the same provider share one — the id is what actually groups
+// a request's lifecycle lines (▶ ⚙ 📊 ✗ 🔑) in the console viewer.
+//
+// A monotonic counter, not random: collision-free within any log window, and its
+// ordering is readable. Base36 keeps it 4 chars up to ~1.6M requests, then grows.
+let reqIdCursor = Math.floor(Math.random() * 1296); // 36^2 — avoid every restart starting at #0000
+export function nextReqId() {
+  reqIdCursor = (reqIdCursor + 1) % 1679616; // 36^4
+  return reqIdCursor.toString(36).padStart(4, "0");
+}
+
+// Print one correlated line: [time] #id tag symbol message
+export function line(tag, symbol, message, reqId) {
   if (LEVEL > LOG_LEVELS.INFO) return;
-  console.log(`[${formatTime()}] ${tag} ${symbol} ${message}`);
+  console.log(`[${formatTime()}]${reqId ? ` #${reqId}` : ""} ${tag} ${symbol} ${message}`);
 }
 
 // Like line() but always printed regardless of LOG_LEVEL (errors must never be hidden)
-export function errorLine(tag, symbol, message) {
-  console.log(`[${formatTime()}] ${tag} ${symbol} ${message}`);
+export function errorLine(tag, symbol, message, reqId) {
+  console.log(`[${formatTime()}]${reqId ? ` #${reqId}` : ""} ${tag} ${symbol} ${message}`);
 }
 
 // Format thinking intent for the request line ("high(10k)" / "off" / "auto")
