@@ -123,6 +123,22 @@ function npmInstall(pkgs, opts = {}) {
   return res.ok;
 }
 
+// Postgres makes the whole SQLite chain dead code (see driver.js), so there is
+// nothing worth downloading. Mirrors driver.js's selection: DB_DRIVER decides
+// when set, otherwise the two generic URL names do. Skipping the install for a
+// config that then boots on SQLite would leave it on the slow sql.js fallback,
+// so this must not be more eager than driver.js.
+const PG_URL_ENV_VARS = ["DATABASE_URL", "POSTGRES_URL"];
+const PG_URL_VENDOR_VARS = ["NEON_DB_URL", "SUPABASE_DB_URL", "PG_URL", "PGURL"];
+
+function hasPostgresUrl() {
+  const isUrl = (name) => /^postgres(ql)?:\/\//i.test((process.env[name] || "").trim());
+  const pref = (process.env.DB_DRIVER || "").trim().toLowerCase();
+  if (["sqlite", "sqlite3", "local"].includes(pref)) return false;
+  if (["postgres", "postgresql", "pg"].includes(pref)) return true;
+  return PG_URL_ENV_VARS.some(isUrl);
+}
+
 // Public: ensure better-sqlite3 native module is installed in user-writable
 // runtime dir. sql.js may be bundled in bin/app, but npm publish strips .wasm
 // from nested node_modules — verify and reinstall if missing. node:sqlite is
@@ -136,6 +152,10 @@ function isSqlJsWasmValid() {
 }
 
 function ensureSqliteRuntime({ silent = false } = {}) {
+  if (hasPostgresUrl()) {
+    if (!silent) console.log("✅ Postgres configured — skipping SQLite engine install");
+    return { betterSqlite: false, sqlJs: false, skipped: "postgres" };
+  }
   ensureRuntimeDir();
 
   let sqlJsOk = isSqlJsWasmValid();
@@ -172,6 +192,7 @@ function buildEnvWithRuntime(baseEnv = process.env) {
 
 module.exports = {
   ensureSqliteRuntime,
+  hasPostgresUrl,
   buildEnvWithRuntime,
   getRuntimeDir,
   getRuntimeNodeModules,

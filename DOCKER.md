@@ -50,6 +50,72 @@ $DATA_DIR/
 Host path: `$HOME/.9router/db/data.sqlite`
 Container path: `/app/data/db/data.sqlite`
 
+## Use Postgres instead of SQLite
+
+Set `DATABASE_URL` (or `POSTGRES_URL`) and 9Router stores everything in
+Postgres instead of the SQLite file. The schema is created on first start.
+Without one of those two variables nothing changes — SQLite under `DATA_DIR`
+stays the default.
+
+`DB_DRIVER` selects the engine explicitly when you would rather not rely on a
+URL name. `DB_DRIVER=postgres` additionally accepts vendor URL variables
+(`NEON_DB_URL`, `SUPABASE_DB_URL`, `PG_URL`, `PGURL`) and fails to start if none
+is set, rather than quietly using SQLite. `DB_DRIVER=sqlite` forces SQLite even
+when a Postgres URL is present in the environment.
+
+```bash
+docker run -d \
+  -p 20128:20128 \
+  -v "$HOME/.9router:/app/data" \
+  -e DATA_DIR=/app/data \
+  -e DATABASE_URL="postgres://user:password@db.example.com:5432/9router?sslmode=require" \
+  --name 9router \
+  dipandhali2021/9router:latest
+```
+
+A URL that cannot be reached fails startup rather than falling back to SQLite —
+falling back would split state across two stores. Keep the volume mounted even
+on Postgres: `DATA_DIR` still holds MITM certs, logs and runtime config.
+
+With a Postgres container in the same compose project, point at it by service
+name and wait for its healthcheck:
+
+```yaml
+services:
+  9router:
+    image: dipandhali2021/9router:latest
+    ports:
+      - "20128:20128"
+    volumes:
+      - 9router-data:/app/data
+    environment:
+      DATA_DIR: /app/data
+      DATABASE_URL: postgres://9router:9router@postgres:5432/9router
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: 9router
+      POSTGRES_PASSWORD: 9router
+      POSTGRES_DB: 9router
+    volumes:
+      - 9router-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U 9router"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  9router-data:
+  9router-pgdata:
+```
+
+Pool size and timeouts are tunable with `PG_POOL_MAX` (default 10),
+`PG_IDLE_TIMEOUT_MS` (30000) and `PG_CONNECT_TIMEOUT_MS` (15000).
+
 ## Optional env vars
 
 ```bash
@@ -63,6 +129,9 @@ docker run -d \
   --name 9router \
   dipandhali2021/9router:latest
 ```
+
+`DB_DRIVER` and `DATABASE_URL` / `POSTGRES_URL` switch the store to Postgres —
+see [Use Postgres instead of SQLite](#use-postgres-instead-of-sqlite).
 
 ## Optional Headroom sidecar
 

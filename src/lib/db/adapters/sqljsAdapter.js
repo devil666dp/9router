@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import initSqlJs from "sql.js";
 import { PRAGMA_SQL } from "../schema.js";
+import { wrapSqlite } from "./sqliteCommon.js";
 
 let SQL = null;
 
@@ -85,20 +86,6 @@ export async function createSqlJsAdapter(filePath) {
     scheduleSave();
   }
 
-  function transaction(fn) {
-    const sp = `sp_${Math.random().toString(36).slice(2)}`;
-    db.exec(`SAVEPOINT ${sp}`);
-    try {
-      const result = fn();
-      db.exec(`RELEASE ${sp}`);
-      scheduleSave();
-      return result;
-    } catch (e) {
-      try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
-      throw e;
-    }
-  }
-
   function close() {
     if (saveTimer) clearTimeout(saveTimer);
     if (dirty) persist();
@@ -111,5 +98,5 @@ export async function createSqlJsAdapter(filePath) {
   process.on("SIGINT", flush);
   process.on("SIGTERM", flush);
 
-  return { driver: "sql.js", run, get, all, exec, transaction, close, raw: db };
+  return wrapSqlite({ driver: "sql.js", run, get, all, exec, close, raw: db });
 }

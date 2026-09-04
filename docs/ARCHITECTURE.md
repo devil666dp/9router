@@ -56,7 +56,7 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
+        DB[(SQLite or Postgres)]
         UDB[(usage.json + log.txt)]
     end
 
@@ -137,9 +137,37 @@ Main flow modules:
 
 Primary state DB:
 
-- `src/lib/localDb.js`
-- file: `${DATA_DIR}/db.json` (or `~/.9router/db.json` when `DATA_DIR` is unset)
-- entities: providerConnections, providerNodes, modelAliases, combos, apiKeys, settings, pricing
+- `src/lib/db/index.js` (`src/lib/localDb.js` is a backward-compat shim re-exporting it)
+- default file: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite` when `DATA_DIR` is unset)
+- entities: providerConnections, providerNodes, proxyPools, apiKeys, combos, settings, kv (aliases / custom models / disabled models / pricing / mitm aliases), usageHistory, usageDaily, requestDetails
+- per-entity logic in `src/lib/db/repos/*`; declarative schema in `src/lib/db/schema.js`; migrations in `src/lib/db/migrations/`
+
+Storage engine selection (`src/lib/db/driver.js`), first match wins:
+
+| Order | Condition | Adapter |
+| --- | --- | --- |
+| 0 | `DB_DRIVER=sqlite` | skips Postgres entirely, continues below |
+| 1 | `DB_DRIVER=postgres` (URL from `DATABASE_URL`, `POSTGRES_URL`, `NEON_DB_URL`, `SUPABASE_DB_URL`, `PG_URL`, `PGURL`; throws if none) | `adapters/pgAdapter.js` |
+| 1 | `DATABASE_URL` / `POSTGRES_URL` set to a `postgres://` URL | `adapters/pgAdapter.js` |
+| 2 | Bun runtime | `bun:sqlite` |
+| 3 | Node, `better-sqlite3` installed (optionalDependency) | `better-sqlite3` |
+| 4 | Node ≥ 22.5 | `node:sqlite` |
+| 5 | always | `sql.js` (pure JS, WASM) |
+
+Postgres is opt-in and exclusive: when a URL is configured it is the only store,
+and an unreachable one fails startup rather than falling back to SQLite (a
+fallback would split state across two stores). With no URL set, nothing about
+the SQLite path changes.
+
+All five adapters expose one async contract — `run` / `get` / `all` / `exec` /
+`transaction` / `checkpoint` / `close` plus `driver` and `dialect` — so the repos
+hold a single set of SQL strings. `adapters/sqliteCommon.js` gives the SQLite
+drivers statement serialization and SAVEPOINT transactions; `pgAdapter.js`
+absorbs the three Postgres differences (`?` → `$n`, `INSERT OR REPLACE` →
+`ON CONFLICT`, and re-casing the lower-folded result keys of `SELECT *` through
+`COLUMN_CASE_MAP`), and runs each transaction `SERIALIZABLE` with retry on
+`40001`/`40P01` so read-modify-write repos keep the isolation SQLite's single
+writer gave them for free.
 
 Usage DB:
 
@@ -377,7 +405,7 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.9router/db.json`)
+- main state: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite`) — replaced by the configured Postgres database when a `postgres://` URL is set
 - usage stats: `~/.9router/usage.json`
 - request log lines: `~/.9router/log.txt`
 - optional translator/request debug sessions: `<repo>/logs/...`
@@ -394,7 +422,7 @@ flowchart LR
     subgraph ContainerOrProcess[9Router Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
+        MainDB[(SQLite or Postgres)]
         UsageDB[(usage.json/log.txt)]
     end
 
@@ -533,7 +561,7 @@ Runtime visibility sources:
 Environment variables actively used by code:
 
 - App/auth: `JWT_SECRET`, `INITIAL_PASSWORD`
-- Storage: `DATA_DIR`
+- Storage: `DATA_DIR` (SQLite location); `DB_DRIVER` (`postgres` | `sqlite`) selects the engine explicitly, else `DATABASE_URL` / `POSTGRES_URL` switch the store to Postgres, tuned by `PG_POOL_MAX`, `PG_IDLE_TIMEOUT_MS`, `PG_CONNECT_TIMEOUT_MS`. Vendor names (`NEON_DB_URL`, `SUPABASE_DB_URL`, `PG_URL`, `PGURL`) are read only under `DB_DRIVER=postgres`, so one can be kept as a script/test credential without moving a live store
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
 - Logging: `ENABLE_REQUEST_LOGS`
 - Sync/cloud URLing: `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`

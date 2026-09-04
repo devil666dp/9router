@@ -34,20 +34,21 @@ export async function getCustomModels() {
 export async function addCustomModel({ providerAlias, id, type = "llm", name, caps }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
-  let added = false;
-  db.transaction(() => {
-    const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+  // Returned from the callback rather than assigned to an outer variable: the
+  // Postgres adapter re-runs the callback on a serialization failure, and an
+  // outer assignment would survive the discarded attempt.
+  return await db.transaction(async () => {
+    const row = await db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
     if (row) {
       const prev = parseJson(row.value) || {};
       const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}) };
-      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
-      return;
+      await db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
+      return false;
     }
     const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}) });
-    db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
-    added = true;
+    await db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
+    return true;
   });
-  return added;
 }
 
 export async function deleteCustomModel({ providerAlias, id, type = "llm" }) {

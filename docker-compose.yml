@@ -15,6 +15,11 @@ services:
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
       HEADROOM_URL: http://headroom:8787
+      # Uncomment (or set DATABASE_URL in .env) to store state in Postgres
+      # instead of the SQLite file under DATA_DIR. Keep the volume either way —
+      # DATA_DIR still holds MITM certs, logs and runtime config. An unreachable
+      # URL fails startup rather than falling back to SQLite. See DOCKER.md.
+      # DATABASE_URL: postgres://9router:9router@postgres:5432/9router
     depends_on:
       - headroom
 

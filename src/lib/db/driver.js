@@ -42,6 +42,82 @@ async function tryNodeSqlite() {
   }
 }
 
+// Which engine to use, set explicitly. This is the knob to reach for when you
+// want the store chosen by configuration rather than inferred:
+//   DB_DRIVER=postgres  → Postgres, and it is an error if no URL is present
+//   DB_DRIVER=sqlite    → SQLite, even if a Postgres URL is exported
+// Unset → inferred from the URL variables below, which is what a hosted deploy
+// expects (set DATABASE_URL, get Postgres).
+const DRIVER_ALIASES = {
+  postgres: "postgres", postgresql: "postgres", pg: "postgres",
+  sqlite: "sqlite", sqlite3: "sqlite", local: "sqlite",
+};
+
+export function getDbDriverPreference(env = process.env) {
+  const raw = (env.DB_DRIVER || "").trim().toLowerCase();
+  if (!raw) return null;
+  const pref = DRIVER_ALIASES[raw];
+  if (!pref) {
+    console.warn(`[DB] DB_DRIVER='${raw}' unrecognised (use postgres|sqlite) → ignoring`);
+    return null;
+  }
+  return pref;
+}
+
+// URL variables that switch the store on their own. Both are de-facto standards
+// meaning "this is the application's database": DATABASE_URL everywhere,
+// POSTGRES_URL from the Vercel/Neon integrations.
+const PG_URL_ENV_VARS = ["DATABASE_URL", "POSTGRES_URL"];
+
+// Vendor-specific names, read ONLY when DB_DRIVER=postgres asks for Postgres
+// outright. On their own they do not switch anything: people keep one in .env as
+// a credential for scripts and tests, where it means "a Postgres I can reach",
+// not "move this install's store". Auto-activating on one silently moved a
+// running install off its populated SQLite file onto an empty database, and
+// surfaced as a 401 at the dashboard login rather than as a database error.
+// Pairing them with an explicit DB_DRIVER keeps the convenience without the trap.
+const PG_URL_VENDOR_VARS = ["NEON_DB_URL", "SUPABASE_DB_URL", "PG_URL", "PGURL"];
+
+function firstPgUrl(env, names) {
+  for (const name of names) {
+    const v = (env[name] || "").trim();
+    if (!v) continue;
+    if (/^postgres(ql)?:\/\//i.test(v)) return { url: v, source: name };
+  }
+  return null;
+}
+
+export function getPostgresUrl(env = process.env) {
+  const pref = getDbDriverPreference(env);
+  if (pref === "sqlite") return null;
+  if (pref === "postgres") {
+    const found = firstPgUrl(env, [...PG_URL_ENV_VARS, ...PG_URL_VENDOR_VARS]);
+    if (found) return found;
+    // Asked for Postgres and gave no URL: falling back to SQLite here would put
+    // the app on a different store than the operator configured.
+    throw new Error(
+      `[DB] DB_DRIVER=postgres but no postgres:// URL found in ${[...PG_URL_ENV_VARS, ...PG_URL_VENDOR_VARS].join(", ")}`
+    );
+  }
+  return firstPgUrl(env, PG_URL_ENV_VARS);
+}
+
+async function tryPostgres() {
+  const found = getPostgresUrl();
+  if (!found) return null;
+  try {
+    const { createPgAdapter } = await import("./adapters/pgAdapter.js");
+    const adapter = await createPgAdapter(found.url);
+    console.log(`[DB] Postgres via ${found.source}`);
+    return adapter;
+  } catch (e) {
+    // Falling through to SQLite on a bad URL would silently split the app's
+    // state across two stores. A configured Postgres that cannot be reached is
+    // a hard failure.
+    throw new Error(`[DB] Postgres (${found.source}) unavailable: ${e.message}`);
+  }
+}
+
 async function trySqlJs() {
   try {
     const { createSqlJsAdapter } = await import("./adapters/sqljsAdapter.js");
@@ -53,11 +129,23 @@ async function trySqlJs() {
 }
 
 async function initAdapter() {
+  // Postgres first: when a URL is configured it is the store, no fallback.
+  let adapter = await tryPostgres();
+  if (adapter) {
+    if (!state.logged) {
+      console.log(`[DB] Driver: ${adapter.driver}`);
+      state.logged = true;
+    }
+    const { runMigrationOnce } = await import("./migrate.js");
+    await runMigrationOnce(adapter);
+    return adapter;
+  }
+
   ensureDirs();
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
   //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
-  let adapter = await tryBunSqlite();
+  adapter = await tryBunSqlite();
   if (!adapter) adapter = await tryBetterSqlite();
   if (!adapter) adapter = await tryNodeSqlite();
   if (!adapter) adapter = await trySqlJs();

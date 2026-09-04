@@ -12,6 +12,26 @@ const buildHomeDir = path.join(cliDir, ".build-home");
 const buildDistDirName = ".next-cli-build";
 const buildDistDir = path.join(appDir, buildDistDirName);
 
+// `pg` and its runtime dependency closure. Enumerated because ensureModuleInBundle
+// copies one package directory at a time and does not walk dependencies; verify with
+// `npm ls pg --all` after a pg upgrade. pg-cloudflare is an optionalDependency for
+// Workers and pg-native an unused peer, so neither is bundled.
+const PG_BUNDLE_PKGS = [
+  "pg",
+  "pg-connection-string",
+  "pg-int8",
+  "pg-pool",
+  "pg-protocol",
+  "pg-types",
+  "pgpass",
+  "postgres-array",
+  "postgres-bytea",
+  "postgres-date",
+  "postgres-interval",
+  "split2",
+  "xtend",
+];
+
 // Exclude patterns for files/folders we don't want to copy
 const EXCLUDE_PATTERNS = [
   "@img",           // Sharp image processing (not needed with unoptimized images)
@@ -225,7 +245,7 @@ function buildCliPackage() {
   // Strip better-sqlite3 (native) — it lives in ~/.9router/runtime to avoid
   // Windows EBUSY during global CLI updates. node:sqlite (Node ≥22.5) is also
   // available as a no-install middle tier.
-  console.log("3️⃣ b Configuring SQLite drivers...");
+  console.log("3️⃣ b Configuring database drivers...");
   function ensureModuleInBundle(pkg) {
     const dest = path.join(cliAppDir, "node_modules", pkg);
     if (fs.existsSync(dest)) {
@@ -250,6 +270,11 @@ function buildCliPackage() {
   // the bundle's node_modules or every importer throws MODULE_NOT_FOUND at runtime. Output
   // tracing normally copies it; this is the same belt-and-braces guard used for sql.js.
   ensureModuleInBundle("open");
+  // `pg` is also external, and it is imported dynamically (only when a Postgres URL is
+  // configured), so tracing may not see it at all. Pure JS, ~700 KB with its deps, and it
+  // is the difference between a packaged CLI that can talk to Postgres and one that throws
+  // MODULE_NOT_FOUND the moment DATABASE_URL is set.
+  for (const pkg of PG_BUNDLE_PKGS) ensureModuleInBundle(pkg);
   const betterDir = path.join(cliAppDir, "node_modules", "better-sqlite3");
   if (fs.existsSync(betterDir)) {
     fs.rmSync(betterDir, { recursive: true, force: true });

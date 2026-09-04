@@ -137,6 +137,32 @@
   column + index), and `/api/usage/request-details` accepts `reqId`, so a line in
   the console links straight to its stored payloads
 
+- **Database**: optional PostgreSQL backend alongside the embedded SQLite store.
+  `DB_DRIVER=postgres|sqlite` selects the engine outright; with it unset only
+  `DATABASE_URL`/`POSTGRES_URL` switch on their own, so a vendor-named URL
+  (`NEON_DB_URL`, `SUPABASE_DB_URL`, ...) can sit in `.env` for scripts without
+  moving live data. Whichever engine wins is the only store — state is never
+  split across two, and an unreachable Postgres URL fails startup instead of
+  silently falling back to the local file
+- **Database**: SQLite keeps its synchronous internals. The four SQLite adapters
+  still pass in sync primitives and `wrapSqlite()` (`adapters/sqliteCommon.js`)
+  adds the async surface, FIFO statement serialization and SAVEPOINT-based
+  nested transactions; only Postgres is natively async
+- **Database**: the Postgres adapter absorbs the dialect gap so no repo has to
+  know which engine it is on — `?` to `$n` placeholders, `INSERT OR
+  REPLACE`/`OR IGNORE` to `ON CONFLICT`, lower-cased `SELECT *` keys re-cased
+  from the schema, int8 parsed as Number, booleans normalized to 1/0, and
+  `sslmode` resolved into an explicit `ssl` object. Writes run SERIALIZABLE and
+  retry 40001/40P01 with capped jittered backoff
+- **Database**: pg-only paths where SQLite semantics do not apply — schema
+  creation via `information_schema.columns` instead of `PRAGMA table_info`,
+  identity columns instead of `AUTOINCREMENT`, and `backupDbLite()` returning
+  null (ATTACH DATABASE is SQLite-only; the provider owns backups there)
+- **Docker**: `pg` and its 13-package dependency closure are copied into the
+  runtime image explicitly. It is external and dynamically imported, so Next
+  file tracing skipped it and setting `DATABASE_URL` would have failed with
+  MODULE_NOT_FOUND
+
 ## Fixes
 - **Logs**: a custom provider node printed its generated id
   (`openai-compatible-chat-<uuid>`) on both sides of every request line; it now

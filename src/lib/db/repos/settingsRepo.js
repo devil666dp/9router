@@ -69,7 +69,7 @@ const DEFAULT_SETTINGS = {
 
 async function readRaw() {
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
   return row ? parseJson(row.data, {}) : {};
 }
 
@@ -100,15 +100,18 @@ export async function getSettings() {
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
 export async function updateSettings(updates) {
   const db = await getAdapter();
-  let next;
-  db.transaction(function () {
-    const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  // Returned from the callback rather than assigned to an outer variable: the
+  // Postgres adapter re-runs the callback on a serialization failure, and an
+  // outer assignment would survive the discarded attempt.
+  const next = await db.transaction(async function () {
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
     const current = row ? parseJson(row.data, {}) : {};
-    next = { ...current, ...updates };
-    db.run(
+    const merged = { ...current, ...updates };
+    await db.run(
       `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
-      [stringifyJson(next)],
+      [stringifyJson(merged)],
     );
+    return merged;
   });
   return mergeWithDefaults(next);
 }
