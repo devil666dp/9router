@@ -7,6 +7,7 @@ import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, backupDbLite, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
 import { stringifyJson } from "./helpers/jsonCol.js";
+import { encryptColumn, encryptLookupColumn } from "./helpers/secretCrypto.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
@@ -133,7 +134,7 @@ async function importLegacyMain(adapter, data) {
     const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
     await adapter.run(
       `INSERT OR REPLACE INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, provider, authType || "oauth", name || null, email || null, priority || null, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      [id, provider, authType || "oauth", name || null, email || null, priority || null, isActive === false ? 0 : 1, encryptColumn(stringifyJson(rest)), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (c) => ({ id: c.id ?? null, provider: c.provider ?? null, name: c.name ?? null }));
 
@@ -141,7 +142,7 @@ async function importLegacyMain(adapter, data) {
     const { id, type, name, createdAt, updatedAt, ...rest } = n;
     await adapter.run(
       `INSERT OR REPLACE INTO providerNodes(id, type, name, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [id, type || null, name || null, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      [id, type || null, name || null, encryptColumn(stringifyJson(rest)), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (n) => ({ id: n.id ?? null, type: n.type ?? null, name: n.name ?? null }));
 
@@ -149,14 +150,14 @@ async function importLegacyMain(adapter, data) {
     const { id, isActive, testStatus, createdAt, updatedAt, ...rest } = p;
     await adapter.run(
       `INSERT OR REPLACE INTO proxyPools(id, isActive, testStatus, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [id, isActive === false ? 0 : 1, testStatus || "unknown", stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      [id, isActive === false ? 0 : 1, testStatus || "unknown", encryptColumn(stringifyJson(rest)), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (p) => ({ id: p.id ?? null }));
 
   await importWithAssertion(adapter, "apiKeys", data.apiKeys || [], async (k) => {
     await adapter.run(
       `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+      [k.id, encryptLookupColumn(k.key), k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
     );
   }, (k) => ({ id: k.id ?? null, name: k.name ?? null }));
 

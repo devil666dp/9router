@@ -1,10 +1,11 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { encryptColumn, decryptColumn } from "../helpers/secretCrypto.js";
 
 function rowToPool(row) {
   if (!row) return null;
-  const extra = parseJson(row.data, {});
+  const extra = parseJson(decryptColumn(row.data), {});
   return {
     ...extra,
     id: row.id,
@@ -21,7 +22,7 @@ function poolToRow(p) {
     id,
     isActive: isActive === false ? 0 : 1,
     testStatus: testStatus ?? null,
-    data: stringifyJson(rest),
+    data: encryptColumn(stringifyJson(rest)),
     createdAt,
     updatedAt,
   };

@@ -169,6 +169,34 @@ absorbs the three Postgres differences (`?` → `$n`, `INSERT OR REPLACE` →
 `40001`/`40P01` so read-modify-write repos keep the isolation SQLite's single
 writer gave them for free.
 
+Encryption at rest (`src/lib/db/helpers/secretCrypto.js`), opt-in via
+`DB_ENCRYPTION_KEY`:
+
+- Envelope encryption: AES-256-GCM, stored as JSON `{v, iv, tag, ct}` in the same
+  TEXT column, so no schema change and the format can be versioned forward.
+- Sealed columns: the whole `data` blob of `providerConnections`, `providerNodes`
+  and `proxyPools` (OAuth access/refresh tokens, provider API keys, proxy URLs
+  with embedded credentials) plus `apiKeys.key`. Nothing queries into those blobs
+  — no `json_extract`, no `data LIKE`, no `->` — so they are encrypted whole.
+- One seam per repo: the `rowToX` / `xToRow` mapper pair, which every CRUD path
+  already funnels through. `exportDb` decrypts and `importDb` re-seals, so a
+  backup restores on a host with a different key.
+- `apiKeys.key` uses a deterministic SIV-style IV (`HMAC-SHA256(ivKey, plaintext)`)
+  instead of a random one, so `WHERE key = ?` stays a single indexed lookup on the
+  gateway hot path and the UNIQUE constraint keeps its meaning. Everything else
+  uses a random IV.
+- Read-through: rows still holding plaintext are returned as-is and re-sealed on
+  their next write, so enabling the key needs no downtime. Migration `002` seals
+  existing rows eagerly on SQLite; on Postgres it defers to that lazy path,
+  because there is no pre-change local snapshot to roll back to.
+- Reversible, not hashed, for `apiKeys.key`: `usageRepo` joins usage rows to key
+  names by plaintext value, `initializeApp` hands a live key to the MITM proxy at
+  startup, and several dashboard cards paste the real key into runnable examples.
+  Hash-at-rest needs those three plus a show-once UI, and is tracked separately.
+- Limit worth stating plainly: a key in an env var on the same host defeats
+  offline attacks (stolen DB file, leaked dump, misplaced backup) but not an
+  attacker running code in this process, who can read the environment too.
+
 Usage DB:
 
 - `src/lib/usageDb.js`
@@ -553,7 +581,11 @@ Runtime visibility sources:
 - JWT secret (`JWT_SECRET`) secures dashboard session cookie verification/signing
 - Initial password fallback (`INITIAL_PASSWORD`, default `123456`) must be overridden in real deployments
 - API key HMAC secret (`API_KEY_SECRET`) secures generated local API key format
-- Provider secrets (API keys/tokens) are persisted in local DB and should be protected at filesystem level
+- Provider secrets (API keys/tokens) are persisted in the local DB. With `DB_ENCRYPTION_KEY` set they are
+  sealed with AES-256-GCM before they touch storage (see Persistence Layer); with it unset they are plaintext
+  and the DB file must be protected at filesystem level. Either way `usageHistory.apiKey` and
+  `usageDaily.data.meta.apiKey` still hold a plaintext copy of the gateway key, and `settings.data` holds
+  `oidcClientSecret`
 - Cloud sync endpoints rely on API key auth + machine id semantics
 
 ## Environment and Runtime Matrix
@@ -563,6 +595,8 @@ Environment variables actively used by code:
 - App/auth: `JWT_SECRET`, `INITIAL_PASSWORD`
 - Storage: `DATA_DIR` (SQLite location); `DB_DRIVER` (`postgres` | `sqlite`) selects the engine explicitly, else `DATABASE_URL` / `POSTGRES_URL` switch the store to Postgres, tuned by `PG_POOL_MAX`, `PG_IDLE_TIMEOUT_MS`, `PG_CONNECT_TIMEOUT_MS`. Vendor names (`NEON_DB_URL`, `SUPABASE_DB_URL`, `PG_URL`, `PGURL`) are read only under `DB_DRIVER=postgres`, so one can be kept as a script/test credential without moving a live store
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
+- Secret encryption at rest: `DB_ENCRYPTION_KEY` (unset = plaintext secrets; 64 hex chars, 32-byte base64, or a
+  passphrase stretched with scrypt — losing it loses every stored credential)
 - Logging: `ENABLE_REQUEST_LOGS`
 - Sync/cloud URLing: `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`
 - Outbound proxy: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants

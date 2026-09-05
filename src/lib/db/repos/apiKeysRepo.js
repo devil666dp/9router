@@ -1,11 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
+import { decryptColumn, encryptLookupColumn, keyLookupCandidates } from "../helpers/secretCrypto.js";
 
 function rowToKey(row) {
   if (!row) return null;
   return {
     id: row.id,
-    key: row.key,
+    key: decryptColumn(row.key),
     name: row.name,
     machineId: row.machineId,
     isActive: row.isActive === 1 || row.isActive === true,
@@ -40,7 +41,7 @@ export async function createApiKey(name, machineId) {
   };
   await db.run(
     `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-    [apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt]
+    [apiKey.id, encryptLookupColumn(apiKey.key), apiKey.name, apiKey.machineId, 1, apiKey.createdAt]
   );
   return apiKey;
 }
@@ -56,7 +57,7 @@ export async function updateApiKey(id, data) {
     const merged = { ...rowToKey(row), ...data };
     await db.run(
       `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ? WHERE id = ?`,
-      [merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0, id]
+      [encryptLookupColumn(merged.key), merged.name, merged.machineId, merged.isActive ? 1 : 0, id]
     );
     return merged;
   });
@@ -70,7 +71,12 @@ export async function deleteApiKey(id) {
 
 export async function validateApiKey(key) {
   const db = await getAdapter();
-  const row = await db.get(`SELECT isActive FROM apiKeys WHERE key = ?`, [key]);
+  // The key column is deterministically encrypted, so this stays a single indexed
+  // equality lookup — it runs on every gateway request. Two candidates are tried:
+  // the sealed form, plus the bare plaintext for rows not rewritten yet.
+  const candidates = keyLookupCandidates(key);
+  const placeholders = candidates.map(() => "?").join(", ");
+  const row = await db.get(`SELECT isActive FROM apiKeys WHERE key IN (${placeholders})`, candidates);
   if (!row) return false;
   return row.isActive === 1 || row.isActive === true;
 }

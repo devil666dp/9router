@@ -194,6 +194,34 @@
   ("Invalid tool use format.") until the id left the context. The suffix is now
   cut at the marker, and both response legs strip it before the client sees it
 
+## Security
+- **Database**: encryption at rest for stored secrets, opt-in with
+  `DB_ENCRYPTION_KEY`. OAuth access/refresh tokens, provider API keys, proxy URLs
+  with embedded credentials and gateway `sk-…` keys were plaintext in the SQLite
+  file and in Postgres rows, so a leaked disk, a `pg_dump`, a stray backup or an
+  `exportDb` output handed them over directly. They are now sealed with
+  AES-256-GCM (`src/lib/db/helpers/secretCrypto.js`) as a versioned envelope
+  `{v, iv, tag, ct}` written into the same TEXT column — no schema change, and the
+  format can move forward. Sealed: the whole `data` blob of `providerConnections`,
+  `providerNodes` and `proxyPools`, plus `apiKeys.key`
+- **Database**: one seam per repo (the `rowToX` / `xToRow` mapper pair every CRUD
+  path already funnels through), so nothing above the DB layer changes. `exportDb`
+  decrypts and `importDb` re-seals, so a backup still restores on a host with a
+  different key, and the one-time legacy-JSON import writes the sealed form
+- **Database**: rows written before the key existed keep being read as plaintext
+  and are re-sealed on their next write, so turning encryption on needs no
+  downtime. Migration `002` seals existing rows eagerly on SQLite; on Postgres it
+  defers to that lazy path, since there is no pre-change local snapshot there to
+  roll back to. `apiKeys.key` uses a deterministic SIV-style IV so the gateway's
+  `WHERE key = ?` stays one indexed lookup and the UNIQUE constraint keeps its
+  meaning; every other value gets a random IV
+- **Database**: honest limit, stated rather than papered over — a key in an env
+  var on the same host defeats offline attacks (stolen DB file, leaked dump,
+  misplaced backup) but not an attacker who can run code in the process, since
+  they can read the environment too. Still plaintext by design in this pass:
+  `usageHistory.apiKey` and `usageDaily.data.meta.apiKey` (the usage-to-key-name
+  join reads them), and `settings.data`'s `oidcClientSecret`
+
 # v0.5.65 (2026-09-03)
 
 ## Features
