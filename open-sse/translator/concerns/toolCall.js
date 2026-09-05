@@ -14,10 +14,27 @@ export function generateToolCallId(msgIndex = 0, tcIndex = 0, toolName = "") {
   return `call_msg${msgIndex}_tc${tcIndex}${name}`;
 }
 
+// Some OpenAI-compatible relays (Bedrock/CodeWhisperer fronts) smuggle the reasoning
+// signature into the tool-call id as `<id>~sig1:<base64>`, since OpenAI chat completions
+// have nowhere else to carry it. Scrubbing that in place deletes "~", ":" and the base64
+// "+/=", which corrupts the payload AND the marker the relay splits on — it then forwards
+// a multi-KB toolUseId upstream and every later turn of the conversation 400s with
+// "Invalid tool use format.". Cut the suffix off instead: the leading segment is the id.
+const SMUGGLED_SIGNATURE_SUFFIX = /~sig\d*:[\s\S]*$/;
+
+// Drop a relay-smuggled signature suffix; returns the id unchanged when there is none.
+export function stripSmuggledToolIdSignature(id) {
+  if (!id || typeof id !== "string") return id;
+  const cut = id.replace(SMUGGLED_SIGNATURE_SUFFIX, "");
+  return cut || id;
+}
+
 // Sanitize ID to match Anthropic pattern: keep only alphanumeric, underscore, hyphen
 function sanitizeToolId(id) {
   if (!id || typeof id !== "string") return null;
-  const sanitized = id.replace(/[^a-zA-Z0-9_-]/g, "");
+  const cut = stripSmuggledToolIdSignature(id);
+  if (TOOL_ID_PATTERN.test(cut)) return cut;
+  const sanitized = cut.replace(/[^a-zA-Z0-9_-]/g, "");
   return sanitized.length > 0 ? sanitized : null;
 }
 

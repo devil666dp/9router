@@ -3,6 +3,7 @@ import { FORMATS } from "../formats.js";
 import { ROLE, CLAUDE_BLOCK, MODEL_FALLBACK } from "../schema/index.js";
 import { fromOpenAIFinish } from "../concerns/finishReason.js";
 import { extractReasoningText } from "../concerns/reasoning.js";
+import { stripSmuggledToolIdSignature } from "../concerns/toolCall.js";
 
 // Legacy "proxy_" prefix used by older request translators. Response strips it
 // defensively so tool names from such turns resolve back (e.g. proxy_Read → Read
@@ -186,11 +187,14 @@ export function openaiToClaudeResponse(chunk, state) {
 
       // GLM/fireworks repeats id+null-name on every arg chunk; open block once per idx
       if (tc.id && !state.toolCalls.has(idx)) {
+        // Never hand the relay-smuggled `~sig1:<base64>` suffix to the client: it would
+        // come back in history and be scrubbed into an unparseable multi-KB id.
+        const toolUseId = stripSmuggledToolIdSignature(tc.id);
         stopThinkingBlock(state, results);
         stopTextBlock(state, results);
 
         const toolBlockIndex = state.nextBlockIndex++;
-        state.toolCalls.set(idx, { id: tc.id, name: tc.function?.name || "", blockIndex: toolBlockIndex });
+        state.toolCalls.set(idx, { id: toolUseId, name: tc.function?.name || "", blockIndex: toolBlockIndex });
 
         // Strip prefix from tool name for response
         let toolName = tc.function?.name || "";
@@ -203,7 +207,7 @@ export function openaiToClaudeResponse(chunk, state) {
           index: toolBlockIndex,
           content_block: {
             type: CLAUDE_BLOCK.TOOL_USE,
-            id: tc.id,
+            id: toolUseId,
             name: toolName,
             input: {}
           }

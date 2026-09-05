@@ -184,6 +184,15 @@
   `/v1/videos/generations`
 - **Video**: an adapter-supplied `Authorization` header is no longer overwritten
   with a bearer token (fal authenticates with `Key <token>`)
+- **Translator**: a relay that smuggles the reasoning signature into the
+  tool-call id (`<id>~sig1:<base64>`, seen on Bedrock/CodeWhisperer fronts) no
+  longer poisons the rest of a conversation. The id reached the client verbatim,
+  so history kept multi-KB `tool_use.id` values, and `ensureToolCallIds` then
+  scrubbed `~`, `:` and the base64 `+/=` in place — destroying both the payload
+  and the marker the relay splits on. It forwarded a multi-KB `toolUseId`
+  upstream and every later turn failed with 400 `REQUEST_BODY_INVALID`
+  ("Invalid tool use format.") until the id left the context. The suffix is now
+  cut at the marker, and both response legs strip it before the client sees it
 
 # v0.5.65 (2026-09-03)
 

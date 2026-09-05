@@ -10,6 +10,7 @@ import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, sav
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { stripSmuggledToolIdSignature } from "../../translator/concerns/toolCall.js";
 
 function parseToolArguments(value) {
   if (!value) return {};
@@ -38,7 +39,8 @@ function openAICompletionToClaudeMessage(responseBody) {
     const fn = toolCall.function || {};
     content.push({
       type: "tool_use",
-      id: toolCall.id || `toolu_${Date.now()}_${content.length}`,
+      // Drop any relay-smuggled `~sig1:<base64>` suffix before it reaches the client.
+      id: stripSmuggledToolIdSignature(toolCall.id) || `toolu_${Date.now()}_${content.length}`,
       name: fn.name || toolCall.name || "",
       input: parseToolArguments(fn.arguments || toolCall.arguments),
     });
