@@ -1,4 +1,4 @@
-# Unreleased
+# v1.5.65 (2026-09-05)
 
 ## Features
 - **Release**: publish the CLI to npm from CI — `.github/workflows/npm-publish.yml`
