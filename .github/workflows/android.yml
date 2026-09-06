@@ -1,11 +1,5 @@
-name: Android client
-on:
-  pull_request:
-    paths: ['android/**', '.github/workflows/android.yml']
-  push:
-    branches: [master, feat/android-material3-client]
-    paths: ['android/**', '.github/workflows/android.yml']
-  workflow_dispatch:
+name: Android build
+on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 concurrency:
@@ -22,17 +16,18 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Unit tests, lint, and debug APK
+      - name: Build debug APK, run unit tests and lint
         working-directory: android
-        run: gradle --no-daemon testDebugUnitTest lintDebug assembleDebug
+        run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: 9router-android-debug
+          name: KotobaWall-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
