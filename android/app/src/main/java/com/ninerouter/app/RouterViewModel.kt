@@ -98,7 +98,13 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
             }
             Screen.Providers, Screen.Quota -> {
                 val rows = client.request("/api/providers").objects("connections")
-                _state.update { it.copy(rows = rows) }
+                if (s.screen == Screen.Providers) {
+                    // Node metadata is optional: retain connections if an older server rejects it.
+                    val nodes = try { client.request("/api/provider-nodes") }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { json("nodesError" to "Custom providers could not be loaded. Tap Refresh to retry.") }
+                    _state.update { it.copy(rows = rows, data = nodes) }
+                } else _state.update { it.copy(rows = rows) }
             }
             Screen.Combos -> {
                 val rows = client.request("/api/combos").objects("combos")
@@ -124,6 +130,22 @@ class RouterViewModel(app: Application) : AndroidViewModel(app) {
             else -> Unit
         }
     }
+    /** Callback fires after the mutation, before reload, so reload failures cannot duplicate a save. */
+    fun saveEntry(body: JSONObject, row: JSONObject? = null, saved: (JSONObject) -> Unit) = launchAction {
+        val client = requireNotNull(api)
+        val path = row?.getString("id")?.let { client.idPath(resource(), it) } ?: resource()
+        val result = client.request(path, if (row == null) "POST" else "PUT", body)
+        saved(result)
+        load()
+        _state.update { it.copy(notice = "Changes saved.") }
+    }
+    fun createNode(body: JSONObject, saved: (JSONObject) -> Unit) = launchAction {
+        val result = requireNotNull(api).request("/api/provider-nodes", "POST", body).getJSONObject("node")
+        saved(result)
+        load()
+        _state.update { it.copy(notice = "Provider created. Add an API key to connect it.") }
+    }
+    fun clearError() { if (!_state.value.busy) _state.update { it.copy(error = null) } }
     fun edit(row: JSONObject? = null) { _state.update { it.copy(formOpen = true, edit = row, error = null) } }
     fun closeForm() { if (!_state.value.busy) _state.update { it.copy(formOpen = false, edit = null) } }
     private fun resource() = when (_state.value.screen) {

@@ -10,6 +10,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -119,7 +120,7 @@ private fun shortLabel(screen: Screen) = when(screen) {
                 topBar = {
                     TopAppBar(title = { Text(state.screen.title) }, navigationIcon = {
                         if (state.screen !in mainScreens) IconButton(onClick = { vm.navigate(Screen.More) }, enabled = !state.busy) {
-                            Icon(Icons.Default.ArrowBack, "Back to more")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to more")
                         }
                     }, actions = {
                         IconButton(onClick = vm::refresh, enabled = !state.busy) { Icon(Icons.Default.Refresh, "Refresh") }
@@ -140,7 +141,12 @@ private fun shortLabel(screen: Screen) = when(screen) {
                             Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
-                    RouterContent(state, vm, Modifier.widthIn(max = 1040.dp).fillMaxWidth().weight(1f))
+                    val bodyModifier = Modifier.widthIn(max = 1040.dp).fillMaxWidth().weight(1f)
+                    when (state.screen) {
+                        Screen.Endpoint -> FriendlyKeys(state, vm, bodyModifier)
+                        Screen.Providers -> FriendlyProviders(state, vm, bodyModifier)
+                        else -> RouterContent(state, vm, bodyModifier)
+                    }
                 }
             }
         }
