@@ -10,8 +10,8 @@ android {
         applicationId = "com.ninerouter.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -43,3 +43,15 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// Generate display-only labels from this checkout; no extra backend endpoint required.
+val catalogAssets = layout.buildDirectory.dir("generated/providerCatalog")
+val generateProviderCatalog by tasks.registering(Exec::class) {
+    inputs.dir(rootProject.file("../open-sse/providers/registry"))
+    inputs.file(rootProject.file("scripts/provider_catalog.py"))
+    outputs.dir(catalogAssets)
+    commandLine("python3", rootProject.file("scripts/provider_catalog.py").absolutePath,
+        catalogAssets.get().file("providers.json").asFile.absolutePath)
+}
+android.sourceSets.getByName("main").assets.srcDir(catalogAssets)
+tasks.named("preBuild").configure { dependsOn(generateProviderCatalog) }
